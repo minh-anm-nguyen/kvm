@@ -1,0 +1,55 @@
+#pragma once
+
+#include <stdint.h>
+
+/* ---- Board / output roles (compile-time for board_role) ---------------- */
+#ifndef BOARD_ROLE
+#error "BOARD_ROLE must be set by the build system (0=A, 1=B)"
+#endif
+
+#define ROLE_A 0
+#define ROLE_B 1
+
+#define OUTPUT_A ROLE_A
+#define OUTPUT_B ROLE_B
+
+/* Default active machine after boot */
+#define DEFAULT_ACTIVE_OUTPUT OUTPUT_A
+
+/* ---- Hardware pins (Raspberry Pi Pico) --------------------------------- */
+#define GPIO_LED_PIN 25
+
+/* UART between boards — same pinout as DeskHop hardware */
+#define BOARD_A_TX 12
+#define BOARD_A_RX 13
+#define BOARD_B_TX 16
+#define BOARD_B_RX 17
+
+#define SERIAL_UART_ID 0 /* uart0 */
+#define SERIAL_BAUDRATE 115200
+
+/* ---- Fixed hotkey (Step 5): Left Ctrl + Caps Lock ---------------------- */
+#define HOTKEY_MODIFIER 0x01 /* Left Ctrl */
+#define HOTKEY_KEYCODE  0x39 /* Caps Lock */
+
+/* ---- Queue lengths (fixed, no allocation) ------------------------------ */
+#define KEYBOARD_TX_QUEUE_LEN 16
+#define MOUSE_TX_QUEUE_LEN    32
+#define UART_TX_QUEUE_LEN     16
+
+/* ---- Timing ------------------------------------------------------------ */
+/* LED identification patterns for Step 1 (distinct A vs B). */
+#define LED_BLINK_MS_ROLE_A 500  /* slow blink  */
+#define LED_BLINK_MS_ROLE_B 100  /* fast blink  */
+
+/* Heartbeat (wired later in Step 7) */
+#define HEARTBEAT_INTERVAL_MS 500
+#define PEER_TIMEOUT_MS       2000
+
+/* Watchdog (wired later in Step 7) */
+#define WATCHDOG_TIMEOUT_MS 3000
+
+/* Protocol (wired later in Step 3) */
+#define PACKET_PREAMBLE_0 0xAA
+#define PACKET_PREAMBLE_1 0x55
+#define PACKET_SIZE       12

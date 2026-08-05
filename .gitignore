@@ -1,0 +1,14 @@
+/build/
+/build-*/
+*.uf2
+*.elf
+*.bin
+*.hex
+*.dis
+*.map
+*.o
+*.d
+.idea/
+.vscode/
+*.swp
+README.md
