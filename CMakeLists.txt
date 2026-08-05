@@ -11,7 +11,6 @@ endif()
 set(PICO_BOARD "pico" CACHE STRING "Pico board type")
 set(PICO_SDK_FETCH_FROM_GIT OFF)
 
-# Prefer PICO_SDK_PATH from environment; otherwise use the bundled DeskHop SDK.
 if(NOT PICO_SDK_PATH AND DEFINED ENV{PICO_SDK_PATH})
     set(PICO_SDK_PATH $ENV{PICO_SDK_PATH})
 endif()
@@ -33,7 +32,6 @@ set(CMAKE_CXX_STANDARD 17)
 
 pico_sdk_init()
 
-# Strict-ish warnings for the application (not the SDK).
 set(KVM_C_WARNINGS
     -Wall
     -Wextra
@@ -44,6 +42,7 @@ set(KVM_C_WARNINGS
 set(KVM_COMMON_SOURCES
     ${CMAKE_CURRENT_LIST_DIR}/src/main.c
     ${CMAKE_CURRENT_LIST_DIR}/src/board.c
+    ${CMAKE_CURRENT_LIST_DIR}/src/usb_device.c
 )
 
 set(KVM_COMMON_INCLUDES
@@ -68,22 +67,21 @@ function(kvm_add_firmware TARGET_NAME BOARD_ROLE)
 
     target_link_libraries(${TARGET_NAME} PRIVATE
         pico_stdlib
+        pico_unique_id
         hardware_gpio
+        tinyusb_device
     )
 
-    # stdio off for now — USB device/host comes in later steps.
     pico_enable_stdio_usb(${TARGET_NAME} 0)
     pico_enable_stdio_uart(${TARGET_NAME} 0)
 
     pico_add_extra_outputs(${TARGET_NAME})
 
-    # Friendly filenames matching MINIMAL_VERSION.md
     set_target_properties(${TARGET_NAME} PROPERTIES
         OUTPUT_NAME ${TARGET_NAME}
     )
 endfunction()
 
-# ROLE_A = 0, ROLE_B = 1 (must match config.h)
 kvm_add_firmware(deskhop-a 0)
 kvm_add_firmware(deskhop-b 1)
 

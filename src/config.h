@@ -49,7 +49,10 @@
 /* Watchdog (wired later in Step 7) */
 #define WATCHDOG_TIMEOUT_MS 3000
 
-/* Protocol (wired later in Step 3) */
+/* Protocol (Step 3) */
 #define PACKET_PREAMBLE_0 0xAA
 #define PACKET_PREAMBLE_1 0x55
 #define PACKET_SIZE       12
+
+/* USB device (Step 2) */
+#define USB_HID_POLL_MS 10
