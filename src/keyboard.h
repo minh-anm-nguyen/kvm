@@ -10,3 +10,4 @@ void keyboard_init(void);
 void keyboard_on_report(const uint8_t *raw, uint16_t len);
 void keyboard_on_unmount(void);
 void keyboard_task(device_state_t *state);
+void keyboard_queue_local(const hid_keyboard_report_t *report);

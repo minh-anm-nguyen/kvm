@@ -66,6 +66,7 @@ set(KVM_COMMON_SOURCES
     ${CMAKE_CURRENT_LIST_DIR}/src/usb_device.c
     ${CMAKE_CURRENT_LIST_DIR}/src/usb_host.c
     ${CMAKE_CURRENT_LIST_DIR}/src/keyboard.c
+    ${CMAKE_CURRENT_LIST_DIR}/src/router.c
     ${CMAKE_CURRENT_LIST_DIR}/src/protocol.c
     ${CMAKE_CURRENT_LIST_DIR}/src/uart.c
     ${PICO_TINYUSB_PATH}/src/portable/raspberrypi/pio_usb/hcd_pio_usb.c

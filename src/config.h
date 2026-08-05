@@ -2,6 +2,8 @@
 
 #include <stdint.h>
 
+#include "class/hid/hid.h"
+
 /* ---- Board / output roles (compile-time for board_role) ---------------- */
 #ifndef BOARD_ROLE
 #error "BOARD_ROLE must be set by the build system (0=A, 1=B)"
@@ -31,9 +33,9 @@
 #define SERIAL_UART_ID 0 /* uart0 */
 #define SERIAL_BAUDRATE 115200
 
-/* ---- Fixed hotkey (Step 5): Left Ctrl + Caps Lock ---------------------- */
-#define HOTKEY_MODIFIER 0x01 /* Left Ctrl */
-#define HOTKEY_KEYCODE  0x39 /* Caps Lock */
+/* ---- Fixed hotkey: Left Ctrl + Caps Lock -------------------------------- */
+#define HOTKEY_MODIFIER KEYBOARD_MODIFIER_LEFTCTRL
+#define HOTKEY_KEYCODE  HID_KEY_CAPS_LOCK
 
 /* ---- Queue lengths (fixed, no allocation) ------------------------------ */
 #define KEYBOARD_TX_QUEUE_LEN 16

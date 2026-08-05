@@ -4,6 +4,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "class/hid/hid.h"
 #include "protocol.h"
 #include "state.h"
 
@@ -13,3 +14,4 @@ void uart_link_task(device_state_t *state);
 void uart_write_bytes(const uint8_t *data, size_t len);
 bool uart_queue_packet(uint8_t type, const uint8_t payload[PACKET_PAYLOAD_LEN]);
 bool uart_queue_heartbeat(const device_state_t *state);
+bool uart_queue_keyboard(const hid_keyboard_report_t *report);

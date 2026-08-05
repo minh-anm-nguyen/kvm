@@ -24,10 +24,12 @@ void board_init(device_state_t *state) {
     state->output_generation = 0;
     state->led_on = false;
     memset(&state->local_keyboard, 0, sizeof(state->local_keyboard));
+    memset(&state->remote_keyboard, 0, sizeof(state->remote_keyboard));
 
     gpio_init(GPIO_LED_PIN);
     gpio_set_dir(GPIO_LED_PIN, GPIO_OUT);
-    gpio_put(GPIO_LED_PIN, 0);
+    gpio_put(GPIO_LED_PIN, state->active_output == OUTPUT_B ? 1 : 0);
+    state->led_on = (state->active_output == OUTPUT_B);
 }
 
 uint32_t board_millis(void) {
@@ -35,22 +37,10 @@ uint32_t board_millis(void) {
 }
 
 void board_update_led(device_state_t *state) {
-    if (state->peer_online) {
-        gpio_put(GPIO_LED_PIN, 1);
-        state->led_on = true;
-        return;
-    }
-
-    const uint32_t period_ms =
-        (state->board_role == ROLE_A) ? LED_BLINK_MS_ROLE_A : LED_BLINK_MS_ROLE_B;
-
-    static uint32_t last_toggle_ms;
-    uint32_t now = board_millis();
-
-    if ((now - last_toggle_ms) >= period_ms) {
-        last_toggle_ms = now;
-        state->led_on = !state->led_on;
-        gpio_put(GPIO_LED_PIN, state->led_on ? 1 : 0);
+    bool on = (state->active_output == OUTPUT_B);
+    if (state->led_on != on) {
+        state->led_on = on;
+        gpio_put(GPIO_LED_PIN, on ? 1 : 0);
     }
 }
 

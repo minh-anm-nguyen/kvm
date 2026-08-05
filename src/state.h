@@ -16,6 +16,7 @@ typedef struct {
     uint8_t  kbd_dev_addr;
     uint8_t  kbd_instance;
     hid_keyboard_report_t local_keyboard;
+    hid_keyboard_report_t remote_keyboard;
 
     uint8_t  mouse_buttons;
     uint32_t last_peer_heartbeat_ms;
