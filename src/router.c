@@ -112,7 +112,9 @@ void router_on_remote_mouse(device_state_t *state, const uint8_t payload[8]) {
     if (state->board_role == ROLE_A) {
         state->mouse_buttons = report.buttons;
         if (state->active_output == OUTPUT_A) {
-            mouse_queue_local(&report);
+            mouse_abs_report_t abs;
+            mouse_abs_from_rel(&report, &abs);
+            mouse_queue_local(&abs);
         }
     }
 }

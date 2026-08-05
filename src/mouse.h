@@ -12,9 +12,20 @@ typedef struct {
     int8_t  wheel;
 } mouse_rel_report_t;
 
+typedef struct __attribute__((packed)) {
+    uint8_t  buttons;
+    uint16_t x;
+    uint16_t y;
+    int8_t   wheel;
+    uint8_t  reserved[2];
+} mouse_abs_report_t;
+
+_Static_assert(sizeof(mouse_abs_report_t) == 8, "mouse_abs_report_t must be 8 bytes");
+
 void mouse_init(void);
 void mouse_on_report(const uint8_t *raw, uint16_t len);
 void mouse_on_unmount(void);
 void mouse_task(device_state_t *state);
-void mouse_queue_local(const mouse_rel_report_t *report);
+void mouse_queue_local(const mouse_abs_report_t *report);
 void mouse_release_local(void);
+void mouse_abs_from_rel(const mouse_rel_report_t *rel, mouse_abs_report_t *out);

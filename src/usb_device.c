@@ -44,8 +44,43 @@ static uint8_t const desc_hid_keyboard[] = {
     TUD_HID_REPORT_DESC_KEYBOARD(),
 };
 
+/* Absolute mouse 0..32767; report is mouse_abs_report_t (8 bytes). */
 static uint8_t const desc_hid_mouse[] = {
-    TUD_HID_REPORT_DESC_MOUSE(),
+    HID_USAGE_PAGE ( HID_USAGE_PAGE_DESKTOP      ),
+    HID_USAGE      ( HID_USAGE_DESKTOP_MOUSE     ),
+    HID_COLLECTION ( HID_COLLECTION_APPLICATION  ),
+      HID_USAGE      ( HID_USAGE_DESKTOP_POINTER ),
+      HID_COLLECTION ( HID_COLLECTION_PHYSICAL   ),
+        HID_USAGE_PAGE  ( HID_USAGE_PAGE_BUTTON  ),
+          HID_USAGE_MIN   ( 1 ),
+          HID_USAGE_MAX   ( 8 ),
+          HID_LOGICAL_MIN ( 0 ),
+          HID_LOGICAL_MAX ( 1 ),
+          HID_REPORT_COUNT( 8 ),
+          HID_REPORT_SIZE ( 1 ),
+          HID_INPUT       ( HID_DATA | HID_VARIABLE | HID_ABSOLUTE ),
+
+        HID_USAGE_PAGE  ( HID_USAGE_PAGE_DESKTOP ),
+          HID_USAGE       ( HID_USAGE_DESKTOP_X ),
+          HID_USAGE       ( HID_USAGE_DESKTOP_Y ),
+          HID_LOGICAL_MIN ( 0 ),
+          HID_LOGICAL_MAX_N ( POINTER_MAX, 2 ),
+          HID_REPORT_SIZE  ( 16 ),
+          HID_REPORT_COUNT ( 2 ),
+          HID_INPUT        ( HID_DATA | HID_VARIABLE | HID_ABSOLUTE ),
+
+          HID_USAGE       ( HID_USAGE_DESKTOP_WHEEL ),
+          HID_LOGICAL_MIN ( 0x81 ),
+          HID_LOGICAL_MAX ( 0x7f ),
+          HID_REPORT_COUNT( 1 ),
+          HID_REPORT_SIZE ( 8 ),
+          HID_INPUT       ( HID_DATA | HID_VARIABLE | HID_RELATIVE ),
+
+          HID_REPORT_COUNT( 2 ),
+          HID_REPORT_SIZE ( 8 ),
+          HID_INPUT       ( HID_CONSTANT ),
+      HID_COLLECTION_END,
+    HID_COLLECTION_END,
 };
 
 enum {
@@ -62,15 +97,15 @@ static uint8_t const desc_configuration[] = {
                        sizeof(desc_hid_keyboard),
                        EPNUM_KEYBOARD,
                        CFG_TUD_HID_EP_BUFSIZE,
-                       10),
+                       USB_HID_POLL_MS),
 
     TUD_HID_DESCRIPTOR(ITF_NUM_MOUSE,
                        STRID_MOUSE,
-                       HID_ITF_PROTOCOL_MOUSE,
+                       HID_ITF_PROTOCOL_NONE,
                        sizeof(desc_hid_mouse),
                        EPNUM_MOUSE,
                        CFG_TUD_HID_EP_BUFSIZE,
-                       10),
+                       USB_HID_POLL_MS),
 };
 
 #if BOARD_ROLE == ROLE_A
@@ -213,24 +248,37 @@ bool usb_device_send_keyboard_empty(void) {
     return tud_hid_n_keyboard_report(ITF_NUM_KEYBOARD, 0, 0, keycode);
 }
 
-bool usb_device_send_mouse(uint8_t buttons, int8_t x, int8_t y, int8_t wheel) {
-    if (!tud_mounted() || !tud_hid_n_ready(ITF_NUM_MOUSE)) {
+bool usb_device_send_mouse(const mouse_abs_report_t *report) {
+    if (!tud_mounted() || !tud_hid_n_ready(ITF_NUM_MOUSE) || report == NULL) {
         return false;
     }
-    return tud_hid_n_mouse_report(ITF_NUM_MOUSE, 0, buttons, x, y, wheel, 0);
+    return tud_hid_n_report(ITF_NUM_MOUSE, 0, report, sizeof(*report));
 }
 
 #ifdef KVM_DEBUG
+static void fill_abs(mouse_abs_report_t *r, uint8_t buttons, uint16_t x, uint16_t y, int8_t wheel) {
+    memset(r, 0, sizeof(*r));
+    r->buttons = buttons;
+    r->x = x;
+    r->y = y;
+    r->wheel = wheel;
+}
+
 static void usb_device_self_test(device_state_t *state) {
     enum {
         ST_IDLE = 0,
         ST_WAIT_HOST,
         ST_KEY_DOWN,
         ST_KEY_UP,
-        ST_MOUSE_MOVE,
+        ST_ABS_CENTER,
+        ST_ABS_TL,
+        ST_ABS_TR,
+        ST_ABS_BR,
+        ST_ABS_BL,
         ST_CLICK_DOWN,
         ST_CLICK_UP,
-        ST_MOUSE_BACK,
+        ST_WHEEL_DOWN,
+        ST_WHEEL_UP,
         ST_DONE,
     };
 
@@ -255,6 +303,8 @@ static void usb_device_self_test(device_state_t *state) {
         step = ST_WAIT_HOST;
         mark_ms = now;
     }
+
+    mouse_abs_report_t mr;
 
     switch (step) {
     case ST_WAIT_HOST:
@@ -288,27 +338,74 @@ static void usb_device_self_test(device_state_t *state) {
         if ((now - mark_ms) < 100) {
             return;
         }
-        if (usb_device_send_mouse(0, 40, 0, 0)) {
-            step = ST_MOUSE_MOVE;
+        fill_abs(&mr, 0, (uint16_t)POINTER_CENTER, (uint16_t)POINTER_CENTER, 0);
+        if (usb_device_send_mouse(&mr)) {
+            step = ST_ABS_CENTER;
             mark_ms = now;
         }
         break;
 
-    case ST_MOUSE_MOVE:
-        if ((now - mark_ms) < 80) {
+    case ST_ABS_CENTER:
+        if ((now - mark_ms) < 120) {
             return;
         }
-        if (usb_device_send_mouse(MOUSE_BUTTON_LEFT, 0, 0, 0)) {
+        fill_abs(&mr, 0, (uint16_t)POINTER_MIN, (uint16_t)POINTER_MIN, 0);
+        if (usb_device_send_mouse(&mr)) {
+            step = ST_ABS_TL;
+            mark_ms = now;
+        }
+        break;
+
+    case ST_ABS_TL:
+        if ((now - mark_ms) < 120) {
+            return;
+        }
+        fill_abs(&mr, 0, (uint16_t)POINTER_MAX, (uint16_t)POINTER_MIN, 0);
+        if (usb_device_send_mouse(&mr)) {
+            step = ST_ABS_TR;
+            mark_ms = now;
+        }
+        break;
+
+    case ST_ABS_TR:
+        if ((now - mark_ms) < 120) {
+            return;
+        }
+        fill_abs(&mr, 0, (uint16_t)POINTER_MAX, (uint16_t)POINTER_MAX, 0);
+        if (usb_device_send_mouse(&mr)) {
+            step = ST_ABS_BR;
+            mark_ms = now;
+        }
+        break;
+
+    case ST_ABS_BR:
+        if ((now - mark_ms) < 120) {
+            return;
+        }
+        fill_abs(&mr, 0, (uint16_t)POINTER_MIN, (uint16_t)POINTER_MAX, 0);
+        if (usb_device_send_mouse(&mr)) {
+            step = ST_ABS_BL;
+            mark_ms = now;
+        }
+        break;
+
+    case ST_ABS_BL:
+        if ((now - mark_ms) < 120) {
+            return;
+        }
+        fill_abs(&mr, MOUSE_BUTTON_LEFT, (uint16_t)POINTER_CENTER, (uint16_t)POINTER_CENTER, 0);
+        if (usb_device_send_mouse(&mr)) {
             step = ST_CLICK_DOWN;
             mark_ms = now;
         }
         break;
 
     case ST_CLICK_DOWN:
-        if ((now - mark_ms) < 60) {
+        if ((now - mark_ms) < 80) {
             return;
         }
-        if (usb_device_send_mouse(0, 0, 0, 0)) {
+        fill_abs(&mr, 0, (uint16_t)POINTER_CENTER, (uint16_t)POINTER_CENTER, 0);
+        if (usb_device_send_mouse(&mr)) {
             step = ST_CLICK_UP;
             mark_ms = now;
         }
@@ -318,17 +415,32 @@ static void usb_device_self_test(device_state_t *state) {
         if ((now - mark_ms) < 80) {
             return;
         }
-        if (usb_device_send_mouse(0, -40, 0, 0)) {
-            step = ST_MOUSE_BACK;
+        fill_abs(&mr, 0, (uint16_t)POINTER_CENTER, (uint16_t)POINTER_CENTER, 3);
+        if (usb_device_send_mouse(&mr)) {
+            step = ST_WHEEL_DOWN;
             mark_ms = now;
         }
         break;
 
-    case ST_MOUSE_BACK:
+    case ST_WHEEL_DOWN:
         if ((now - mark_ms) < 80) {
             return;
         }
-        step = ST_DONE;
+        fill_abs(&mr, 0, (uint16_t)POINTER_CENTER, (uint16_t)POINTER_CENTER, -3);
+        if (usb_device_send_mouse(&mr)) {
+            step = ST_WHEEL_UP;
+            mark_ms = now;
+        }
+        break;
+
+    case ST_WHEEL_UP:
+        if ((now - mark_ms) < 80) {
+            return;
+        }
+        fill_abs(&mr, 0, (uint16_t)POINTER_CENTER, (uint16_t)POINTER_CENTER, 0);
+        if (usb_device_send_mouse(&mr)) {
+            step = ST_DONE;
+        }
         break;
 
     default:
@@ -341,7 +453,7 @@ void usb_device_task(device_state_t *state) {
     tud_task();
 
 #ifdef KVM_DEBUG
-    if (!state->input_connected) {
+    if (!state->input_connected && !state->mouse_connected) {
         usb_device_self_test(state);
     }
 #else

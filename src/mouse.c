@@ -10,7 +10,7 @@
 #include "usb_device.h"
 
 typedef struct {
-    mouse_rel_report_t items[MOUSE_TX_QUEUE_LEN];
+    mouse_abs_report_t items[MOUSE_TX_QUEUE_LEN];
     uint8_t head;
     uint8_t tail;
     uint8_t count;
@@ -18,8 +18,12 @@ typedef struct {
 
 static mouse_queue_t s_tx_q;
 
-static bool queue_push(const mouse_rel_report_t *report) {
+static bool queue_push(const mouse_abs_report_t *report) {
     if (s_tx_q.count >= MOUSE_TX_QUEUE_LEN) {
+        if (report->buttons == 0) {
+            s_tx_q.items[s_tx_q.head] = *report;
+            return true;
+        }
         s_tx_q.head = (uint8_t)((s_tx_q.head + 1) % MOUSE_TX_QUEUE_LEN);
         s_tx_q.count--;
     }
@@ -30,7 +34,7 @@ static bool queue_push(const mouse_rel_report_t *report) {
     return true;
 }
 
-static bool queue_peek(mouse_rel_report_t *report) {
+static bool queue_peek(mouse_abs_report_t *report) {
     if (s_tx_q.count == 0) {
         return false;
     }
@@ -46,7 +50,18 @@ static void queue_pop(void) {
     s_tx_q.count--;
 }
 
-void mouse_queue_local(const mouse_rel_report_t *report) {
+void mouse_abs_from_rel(const mouse_rel_report_t *rel, mouse_abs_report_t *out) {
+    if (rel == NULL || out == NULL) {
+        return;
+    }
+    memset(out, 0, sizeof(*out));
+    out->buttons = rel->buttons;
+    out->x = (uint16_t)POINTER_CENTER;
+    out->y = (uint16_t)POINTER_CENTER;
+    out->wheel = rel->wheel;
+}
+
+void mouse_queue_local(const mouse_abs_report_t *report) {
     if (report == NULL) {
         return;
     }
@@ -54,7 +69,9 @@ void mouse_queue_local(const mouse_rel_report_t *report) {
 }
 
 void mouse_release_local(void) {
-    mouse_rel_report_t empty = {0};
+    mouse_abs_report_t empty = {0};
+    empty.x = (uint16_t)POINTER_CENTER;
+    empty.y = (uint16_t)POINTER_CENTER;
     g_state.mouse_buttons = 0;
     queue_push(&empty);
 }
@@ -82,7 +99,9 @@ static void mouse_route(device_state_t *state, const mouse_rel_report_t *report)
     }
 
     if (state->active_output == OUTPUT_B) {
-        mouse_queue_local(report);
+        mouse_abs_report_t abs;
+        mouse_abs_from_rel(report, &abs);
+        mouse_queue_local(&abs);
     } else {
         uart_queue_mouse(report);
     }
@@ -111,7 +130,7 @@ void mouse_on_unmount(void) {
 }
 
 void mouse_task(device_state_t *state) {
-    mouse_rel_report_t report;
+    mouse_abs_report_t report;
     if (!queue_peek(&report)) {
         return;
     }
@@ -120,7 +139,7 @@ void mouse_task(device_state_t *state) {
         return;
     }
 
-    if (usb_device_send_mouse(report.buttons, report.x, report.y, report.wheel)) {
+    if (usb_device_send_mouse(&report)) {
         queue_pop();
     }
 
