@@ -4,12 +4,12 @@
 #include "hardware/gpio.h"
 
 void board_init(device_state_t *state) {
-    state->board_role    = (uint8_t)BOARD_ROLE;
-    state->active_output = DEFAULT_ACTIVE_OUTPUT;
-    state->peer_online   = false;
+    state->board_role       = (uint8_t)BOARD_ROLE;
+    state->active_output    = DEFAULT_ACTIVE_OUTPUT;
+    state->peer_online      = false;
     state->usb_device_ready = false;
-    state->input_connected = false;
-    state->mouse_buttons = 0;
+    state->input_connected  = false;
+    state->mouse_buttons    = 0;
     state->last_peer_heartbeat_ms = 0;
     state->output_generation = 0;
     state->led_on = false;
@@ -24,6 +24,12 @@ uint32_t board_millis(void) {
 }
 
 void board_update_led(device_state_t *state) {
+    if (state->peer_online) {
+        gpio_put(GPIO_LED_PIN, 1);
+        state->led_on = true;
+        return;
+    }
+
     const uint32_t period_ms =
         (state->board_role == ROLE_A) ? LED_BLINK_MS_ROLE_A : LED_BLINK_MS_ROLE_B;
 
@@ -38,5 +44,4 @@ void board_update_led(device_state_t *state) {
 }
 
 void board_kick_watchdog(void) {
-    /* No-op until Step 7 enables the hardware watchdog. */
 }

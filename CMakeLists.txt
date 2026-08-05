@@ -43,6 +43,8 @@ set(KVM_COMMON_SOURCES
     ${CMAKE_CURRENT_LIST_DIR}/src/main.c
     ${CMAKE_CURRENT_LIST_DIR}/src/board.c
     ${CMAKE_CURRENT_LIST_DIR}/src/usb_device.c
+    ${CMAKE_CURRENT_LIST_DIR}/src/protocol.c
+    ${CMAKE_CURRENT_LIST_DIR}/src/uart.c
 )
 
 set(KVM_COMMON_INCLUDES
@@ -69,6 +71,7 @@ function(kvm_add_firmware TARGET_NAME BOARD_ROLE)
         pico_stdlib
         pico_unique_id
         hardware_gpio
+        hardware_uart
         tinyusb_device
     )
 
