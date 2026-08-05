@@ -5,6 +5,9 @@
 
 #include "pico/stdlib.h"
 #include "hardware/gpio.h"
+#include "hardware/watchdog.h"
+
+#include "config.h"
 
 int dh_debug_printf(const char *format, ...) {
     (void)format;
@@ -35,6 +38,14 @@ void board_init(device_state_t *state) {
     state->led_on = (state->active_output == OUTPUT_B);
 }
 
+void board_enable_watchdog(void) {
+#ifdef KVM_DEBUG
+    watchdog_enable(WATCHDOG_TIMEOUT_MS, true);
+#else
+    watchdog_enable(WATCHDOG_TIMEOUT_MS, false);
+#endif
+}
+
 uint32_t board_millis(void) {
     return to_ms_since_boot(get_absolute_time());
 }
@@ -48,4 +59,5 @@ void board_update_led(device_state_t *state) {
 }
 
 void board_kick_watchdog(void) {
+    watchdog_update();
 }

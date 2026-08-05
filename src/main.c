@@ -19,6 +19,8 @@ int main(void) {
     usb_device_init();
     uart_link_init(g_state.board_role);
 
+    board_enable_watchdog();
+
     while (true) {
         usb_device_task(&g_state);
         usb_host_task();

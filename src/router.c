@@ -10,6 +10,28 @@ bool router_is_local_active(const device_state_t *state) {
     return state->active_output == state->board_role;
 }
 
+static void pack_select_payload(uint8_t payload[PACKET_PAYLOAD_LEN], uint8_t output, uint32_t gen) {
+    memset(payload, 0, PACKET_PAYLOAD_LEN);
+    payload[0] = output;
+    payload[1] = (uint8_t)(gen & 0xFF);
+    payload[2] = (uint8_t)((gen >> 8) & 0xFF);
+    payload[3] = (uint8_t)((gen >> 16) & 0xFF);
+    payload[4] = (uint8_t)((gen >> 24) & 0xFF);
+}
+
+static uint32_t unpack_gen(const uint8_t payload[PACKET_PAYLOAD_LEN]) {
+    return (uint32_t)payload[1] |
+           ((uint32_t)payload[2] << 8) |
+           ((uint32_t)payload[3] << 16) |
+           ((uint32_t)payload[4] << 24);
+}
+
+void router_broadcast_active_output(device_state_t *state) {
+    uint8_t payload[PACKET_PAYLOAD_LEN];
+    pack_select_payload(payload, state->active_output, state->output_generation);
+    uart_queue_packet(MSG_SELECT_OUTPUT, payload);
+}
+
 static void release_output(device_state_t *state, uint8_t output) {
     hid_keyboard_report_t empty_kbd = {0};
     mouse_rel_report_t empty_mouse = {0};
@@ -43,23 +65,13 @@ void router_set_active_output(device_state_t *state, uint8_t new_output, bool no
 
     if (notify_peer) {
         state->output_generation++;
-
-        uint8_t payload[PACKET_PAYLOAD_LEN] = {0};
-        payload[0] = state->active_output;
-        payload[1] = (uint8_t)(state->output_generation & 0xFF);
-        payload[2] = (uint8_t)((state->output_generation >> 8) & 0xFF);
-        payload[3] = (uint8_t)((state->output_generation >> 16) & 0xFF);
-        payload[4] = (uint8_t)((state->output_generation >> 24) & 0xFF);
-        uart_queue_packet(MSG_SELECT_OUTPUT, payload);
+        router_broadcast_active_output(state);
     }
 }
 
 void router_on_select_output(device_state_t *state, const uint8_t payload[8]) {
     uint8_t new_output = payload[0];
-    uint32_t gen = (uint32_t)payload[1] |
-                   ((uint32_t)payload[2] << 8) |
-                   ((uint32_t)payload[3] << 16) |
-                   ((uint32_t)payload[4] << 24);
+    uint32_t gen = unpack_gen(payload);
 
     if (new_output > OUTPUT_B) {
         return;
@@ -97,9 +109,65 @@ void router_on_remote_mouse(device_state_t *state, const uint8_t payload[8]) {
     report.y = (int8_t)payload[2];
     report.wheel = (int8_t)payload[3];
 
-    state->mouse_buttons = report.buttons;
+    if (state->board_role == ROLE_A) {
+        state->mouse_buttons = report.buttons;
+        if (state->active_output == OUTPUT_A) {
+            mouse_queue_local(&report);
+        }
+    }
+}
 
-    if (state->board_role == ROLE_A && state->active_output == OUTPUT_A) {
-        mouse_queue_local(&report);
+void router_on_peer_offline(device_state_t *state) {
+    hid_keyboard_report_t empty_kbd = {0};
+    memset(&state->remote_keyboard, 0, sizeof(state->remote_keyboard));
+
+    if (state->board_role == ROLE_B) {
+        keyboard_queue_local(&empty_kbd);
+    }
+
+    if (state->board_role == ROLE_A) {
+        state->mouse_buttons = 0;
+        mouse_release_local();
+    }
+}
+
+void router_on_peer_heartbeat(device_state_t *state, const uint8_t payload[8], bool peer_just_online) {
+    uint8_t peer_output = payload[1];
+    uint32_t peer_gen = (uint32_t)payload[2] |
+                        ((uint32_t)payload[3] << 8) |
+                        ((uint32_t)payload[4] << 16) |
+                        ((uint32_t)payload[5] << 24);
+
+    if (peer_output > OUTPUT_B) {
+        return;
+    }
+
+    if (peer_gen > state->output_generation) {
+        uint8_t sel[PACKET_PAYLOAD_LEN];
+        pack_select_payload(sel, peer_output, peer_gen);
+        router_on_select_output(state, sel);
+        return;
+    }
+
+    if (peer_gen < state->output_generation) {
+        if (peer_just_online) {
+            router_broadcast_active_output(state);
+        }
+        return;
+    }
+
+    if (peer_output != state->active_output) {
+        if (state->board_role == ROLE_B) {
+            uint8_t sel[PACKET_PAYLOAD_LEN];
+            pack_select_payload(sel, peer_output, peer_gen);
+            router_on_select_output(state, sel);
+        } else {
+            router_broadcast_active_output(state);
+        }
+        return;
+    }
+
+    if (peer_just_online) {
+        router_broadcast_active_output(state);
     }
 }

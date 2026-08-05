@@ -102,6 +102,7 @@ function(kvm_add_firmware TARGET_NAME BOARD_ROLE)
         pico_multicore
         hardware_gpio
         hardware_uart
+        hardware_watchdog
         hardware_pio
         hardware_dma
         tinyusb_device

@@ -8,8 +8,6 @@
 
 #include "board.h"
 #include "config.h"
-#include "keyboard.h"
-#include "mouse.h"
 #include "router.h"
 
 #define SERIAL_UART uart0
@@ -127,8 +125,10 @@ bool uart_queue_mouse(const mouse_rel_report_t *report) {
 }
 
 static void handle_rx_packet(device_state_t *state, const uart_packet_t *pkt) {
+    bool was_online = state->peer_online;
     state->last_peer_heartbeat_ms = board_millis();
     state->peer_online = true;
+    bool just_online = !was_online;
 
     switch (pkt->type) {
     case MSG_SELECT_OUTPUT:
@@ -140,27 +140,15 @@ static void handle_rx_packet(device_state_t *state, const uart_packet_t *pkt) {
     case MSG_MOUSE_REPORT:
         router_on_remote_mouse(state, pkt->payload);
         break;
-    case MSG_HEARTBEAT: {
-        if (pkt->payload[1] > OUTPUT_B) {
-            break;
-        }
-        uint32_t gen = (uint32_t)pkt->payload[2] |
-                       ((uint32_t)pkt->payload[3] << 8) |
-                       ((uint32_t)pkt->payload[4] << 16) |
-                       ((uint32_t)pkt->payload[5] << 24);
-        if (gen > state->output_generation) {
-            uint8_t sel[PACKET_PAYLOAD_LEN] = {0};
-            sel[0] = pkt->payload[1];
-            sel[1] = pkt->payload[2];
-            sel[2] = pkt->payload[3];
-            sel[3] = pkt->payload[4];
-            sel[4] = pkt->payload[5];
-            router_on_select_output(state, sel);
-        }
+    case MSG_HEARTBEAT:
+        router_on_peer_heartbeat(state, pkt->payload, just_online);
         break;
-    }
     default:
         break;
+    }
+
+    if (just_online && pkt->type != MSG_HEARTBEAT) {
+        router_broadcast_active_output(state);
     }
 }
 
@@ -197,20 +185,15 @@ static void update_peer_timeout(device_state_t *state) {
     if (!state->peer_online) {
         return;
     }
+
     uint32_t now = board_millis();
-    if ((now - state->last_peer_heartbeat_ms) > PEER_TIMEOUT_MS) {
-        state->peer_online = false;
-        protocol_parser_reset(&s_parser);
-        hid_keyboard_report_t empty_kbd = {0};
-        state->remote_keyboard = empty_kbd;
-        state->mouse_buttons = 0;
-        if (state->board_role == ROLE_B) {
-            keyboard_queue_local(&empty_kbd);
-        }
-        if (state->board_role == ROLE_A || state->board_role == ROLE_B) {
-            mouse_release_local();
-        }
+    if ((now - state->last_peer_heartbeat_ms) <= PEER_TIMEOUT_MS) {
+        return;
     }
+
+    state->peer_online = false;
+    protocol_parser_reset(&s_parser);
+    router_on_peer_offline(state);
 }
 
 void uart_link_task(device_state_t *state) {

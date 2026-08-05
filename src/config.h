@@ -47,17 +47,17 @@
 #define LED_BLINK_MS_ROLE_A 500  /* slow blink  */
 #define LED_BLINK_MS_ROLE_B 100  /* fast blink  */
 
-/* Heartbeat (wired later in Step 7) */
+/* Heartbeat / peer recovery */
 #define HEARTBEAT_INTERVAL_MS 500
 #define PEER_TIMEOUT_MS       2000
 
-/* Watchdog (wired later in Step 7) */
+/* Hardware watchdog */
 #define WATCHDOG_TIMEOUT_MS 3000
 
-/* Protocol (Step 3) */
+/* Protocol */
 #define PACKET_PREAMBLE_0 0xAA
 #define PACKET_PREAMBLE_1 0x55
 #define PACKET_SIZE       12
 
-/* USB device (Step 2) */
+/* USB device */
 #define USB_HID_POLL_MS 10
