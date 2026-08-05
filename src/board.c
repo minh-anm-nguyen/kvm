@@ -1,7 +1,15 @@
 #include "board.h"
 
+#include <stdarg.h>
+#include <string.h>
+
 #include "pico/stdlib.h"
 #include "hardware/gpio.h"
+
+int dh_debug_printf(const char *format, ...) {
+    (void)format;
+    return 0;
+}
 
 void board_init(device_state_t *state) {
     state->board_role       = (uint8_t)BOARD_ROLE;
@@ -9,10 +17,13 @@ void board_init(device_state_t *state) {
     state->peer_online      = false;
     state->usb_device_ready = false;
     state->input_connected  = false;
+    state->kbd_dev_addr     = 0;
+    state->kbd_instance     = 0;
     state->mouse_buttons    = 0;
     state->last_peer_heartbeat_ms = 0;
     state->output_generation = 0;
     state->led_on = false;
+    memset(&state->local_keyboard, 0, sizeof(state->local_keyboard));
 
     gpio_init(GPIO_LED_PIN);
     gpio_set_dir(GPIO_LED_PIN, GPIO_OUT);

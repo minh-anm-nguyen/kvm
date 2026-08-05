@@ -341,7 +341,9 @@ void usb_device_task(device_state_t *state) {
     tud_task();
 
 #ifdef KVM_DEBUG
-    usb_device_self_test(state);
+    if (!state->input_connected) {
+        usb_device_self_test(state);
+    }
 #else
     (void)state;
 #endif

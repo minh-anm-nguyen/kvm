@@ -25,6 +25,9 @@
 #define BOARD_B_TX 16
 #define BOARD_B_RX 17
 
+/* PIO-USB host D+/D- (D- is next pin) */
+#define PIO_USB_DP_PIN 14
+
 #define SERIAL_UART_ID 0 /* uart0 */
 #define SERIAL_BAUDRATE 115200
 
