@@ -12,9 +12,12 @@ typedef struct {
     bool    peer_online;
     bool    usb_device_ready;
     bool    input_connected;
+    bool    mouse_connected;
 
     uint8_t  kbd_dev_addr;
     uint8_t  kbd_instance;
+    uint8_t  mouse_dev_addr;
+    uint8_t  mouse_instance;
     hid_keyboard_report_t local_keyboard;
     hid_keyboard_report_t remote_keyboard;
 

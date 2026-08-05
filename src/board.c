@@ -17,8 +17,11 @@ void board_init(device_state_t *state) {
     state->peer_online      = false;
     state->usb_device_ready = false;
     state->input_connected  = false;
+    state->mouse_connected  = false;
     state->kbd_dev_addr     = 0;
     state->kbd_instance     = 0;
+    state->mouse_dev_addr   = 0;
+    state->mouse_instance   = 0;
     state->mouse_buttons    = 0;
     state->last_peer_heartbeat_ms = 0;
     state->output_generation = 0;

@@ -3,6 +3,7 @@
 #include <string.h>
 
 #include "keyboard.h"
+#include "mouse.h"
 #include "uart.h"
 
 bool router_is_local_active(const device_state_t *state) {
@@ -10,15 +11,21 @@ bool router_is_local_active(const device_state_t *state) {
 }
 
 static void release_output(device_state_t *state, uint8_t output) {
-    hid_keyboard_report_t empty = {0};
+    hid_keyboard_report_t empty_kbd = {0};
+    mouse_rel_report_t empty_mouse = {0};
 
     if (output == state->board_role) {
-        keyboard_queue_local(&empty);
+        keyboard_queue_local(&empty_kbd);
+        mouse_release_local();
         return;
     }
 
     if (state->board_role == ROLE_A && output == OUTPUT_B) {
-        uart_queue_keyboard(&empty);
+        uart_queue_keyboard(&empty_kbd);
+    }
+
+    if (state->board_role == ROLE_B && output == OUTPUT_A) {
+        uart_queue_mouse(&empty_mouse);
     }
 }
 
@@ -64,8 +71,9 @@ void router_on_select_output(device_state_t *state, const uint8_t payload[8]) {
 
     uint8_t old = state->active_output;
     if (old != new_output && old == state->board_role) {
-        hid_keyboard_report_t empty = {0};
-        keyboard_queue_local(&empty);
+        hid_keyboard_report_t empty_kbd = {0};
+        keyboard_queue_local(&empty_kbd);
+        mouse_release_local();
     }
 
     state->active_output = new_output;
@@ -79,5 +87,19 @@ void router_on_remote_keyboard(device_state_t *state, const uint8_t payload[8]) 
 
     if (state->board_role == ROLE_B && state->active_output == OUTPUT_B) {
         keyboard_queue_local(&report);
+    }
+}
+
+void router_on_remote_mouse(device_state_t *state, const uint8_t payload[8]) {
+    mouse_rel_report_t report;
+    report.buttons = payload[0];
+    report.x = (int8_t)payload[1];
+    report.y = (int8_t)payload[2];
+    report.wheel = (int8_t)payload[3];
+
+    state->mouse_buttons = report.buttons;
+
+    if (state->board_role == ROLE_A && state->active_output == OUTPUT_A) {
+        mouse_queue_local(&report);
     }
 }

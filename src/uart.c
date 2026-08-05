@@ -9,6 +9,7 @@
 #include "board.h"
 #include "config.h"
 #include "keyboard.h"
+#include "mouse.h"
 #include "router.h"
 
 #define SERIAL_UART uart0
@@ -113,6 +114,18 @@ bool uart_queue_keyboard(const hid_keyboard_report_t *report) {
     return uart_queue_packet(MSG_KEYBOARD_REPORT, payload);
 }
 
+bool uart_queue_mouse(const mouse_rel_report_t *report) {
+    if (report == NULL) {
+        return false;
+    }
+    uint8_t payload[PACKET_PAYLOAD_LEN] = {0};
+    payload[0] = report->buttons;
+    payload[1] = (uint8_t)report->x;
+    payload[2] = (uint8_t)report->y;
+    payload[3] = (uint8_t)report->wheel;
+    return uart_queue_packet(MSG_MOUSE_REPORT, payload);
+}
+
 static void handle_rx_packet(device_state_t *state, const uart_packet_t *pkt) {
     state->last_peer_heartbeat_ms = board_millis();
     state->peer_online = true;
@@ -123,6 +136,9 @@ static void handle_rx_packet(device_state_t *state, const uart_packet_t *pkt) {
         break;
     case MSG_KEYBOARD_REPORT:
         router_on_remote_keyboard(state, pkt->payload);
+        break;
+    case MSG_MOUSE_REPORT:
+        router_on_remote_mouse(state, pkt->payload);
         break;
     case MSG_HEARTBEAT: {
         if (pkt->payload[1] > OUTPUT_B) {
@@ -185,10 +201,14 @@ static void update_peer_timeout(device_state_t *state) {
     if ((now - state->last_peer_heartbeat_ms) > PEER_TIMEOUT_MS) {
         state->peer_online = false;
         protocol_parser_reset(&s_parser);
-        hid_keyboard_report_t empty = {0};
-        state->remote_keyboard = empty;
+        hid_keyboard_report_t empty_kbd = {0};
+        state->remote_keyboard = empty_kbd;
+        state->mouse_buttons = 0;
         if (state->board_role == ROLE_B) {
-            keyboard_queue_local(&empty);
+            keyboard_queue_local(&empty_kbd);
+        }
+        if (state->board_role == ROLE_A || state->board_role == ROLE_B) {
+            mouse_release_local();
         }
     }
 }
