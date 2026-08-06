@@ -3,6 +3,7 @@
 #include "board.h"
 #include "keyboard.h"
 #include "mouse.h"
+#include "protocol.h"
 #include "state.h"
 #include "uart.h"
 #include "usb_device.h"
@@ -16,7 +17,7 @@ int main(void) {
     mouse_init();
 
 #ifdef KVM_DEBUG
-    if (!mouse_pointer_selftest()) {
+    if (!mouse_pointer_selftest() || !protocol_selftest()) {
         while (true) {
             tight_loop_contents();
         }

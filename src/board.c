@@ -29,6 +29,9 @@ void board_init(device_state_t *state) {
     state->pointer_x        = POINTER_CENTER;
     state->pointer_y        = POINTER_CENTER;
     state->edge_switch_armed = true;
+    state->peer_protocol_ok = false;
+    state->protocol_mismatch = false;
+    state->peer_protocol_version = 0;
     state->last_peer_heartbeat_ms = 0;
     state->output_generation = 0;
     state->led_on = false;
@@ -54,7 +57,14 @@ uint32_t board_millis(void) {
 }
 
 void board_update_led(device_state_t *state) {
-    bool on = (state->active_output == OUTPUT_B);
+    bool on;
+
+    if (state->protocol_mismatch) {
+        on = ((board_millis() / LED_PROTOCOL_MISMATCH_MS) & 1u) != 0;
+    } else {
+        on = (state->active_output == OUTPUT_B);
+    }
+
     if (state->led_on != on) {
         state->led_on = on;
         gpio_put(GPIO_LED_PIN, on ? 1 : 0);

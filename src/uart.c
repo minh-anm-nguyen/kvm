@@ -94,12 +94,10 @@ bool uart_queue_packet(uint8_t type, const uint8_t payload[PACKET_PAYLOAD_LEN]) 
 
 bool uart_queue_heartbeat(const device_state_t *state) {
     uint8_t payload[PACKET_PAYLOAD_LEN] = {0};
-    payload[0] = state->board_role;
-    payload[1] = state->active_output;
-    payload[2] = (uint8_t)(state->output_generation & 0xFF);
-    payload[3] = (uint8_t)((state->output_generation >> 8) & 0xFF);
-    payload[4] = (uint8_t)((state->output_generation >> 16) & 0xFF);
-    payload[5] = (uint8_t)((state->output_generation >> 24) & 0xFF);
+    protocol_pack_heartbeat(payload,
+                            state->board_role,
+                            state->active_output,
+                            state->output_generation);
     return uart_queue_packet(MSG_HEARTBEAT, payload);
 }
 
@@ -116,15 +114,14 @@ bool uart_queue_mouse(const mouse_abs_report_t *report) {
     if (report == NULL) {
         return false;
     }
-    uint8_t payload[PACKET_PAYLOAD_LEN] = {0};
-    payload[0] = report->buttons;
-    payload[1] = (uint8_t)(report->x & 0xFF);
-    payload[2] = (uint8_t)((report->x >> 8) & 0xFF);
-    payload[3] = (uint8_t)(report->y & 0xFF);
-    payload[4] = (uint8_t)((report->y >> 8) & 0xFF);
-    payload[5] = (uint8_t)report->wheel;
-    payload[6] = 0;
-    payload[7] = 0;
+    if (!g_state.peer_protocol_ok) {
+        return false;
+    }
+
+    uint8_t payload[PACKET_PAYLOAD_LEN];
+    if (!protocol_pack_mouse(report, payload)) {
+        return false;
+    }
     return uart_queue_packet(MSG_MOUSE_REPORT, payload);
 }
 
@@ -142,7 +139,9 @@ static void handle_rx_packet(device_state_t *state, const uart_packet_t *pkt) {
         router_on_remote_keyboard(state, pkt->payload);
         break;
     case MSG_MOUSE_REPORT:
-        router_on_remote_mouse(state, pkt->payload);
+        if (state->peer_protocol_ok) {
+            router_on_remote_mouse(state, pkt->payload);
+        }
         break;
     case MSG_HEARTBEAT:
         router_on_peer_heartbeat(state, pkt->payload, just_online);
@@ -196,6 +195,9 @@ static void update_peer_timeout(device_state_t *state) {
     }
 
     state->peer_online = false;
+    state->peer_protocol_ok = false;
+    state->protocol_mismatch = false;
+    state->peer_protocol_version = 0;
     protocol_parser_reset(&s_parser);
     router_on_peer_offline(state);
 }

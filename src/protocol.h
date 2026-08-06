@@ -5,6 +5,7 @@
 #include <stdint.h>
 
 #include "config.h"
+#include "mouse.h"
 
 enum message_type {
     MSG_KEYBOARD_REPORT = 1,
@@ -36,3 +37,18 @@ bool protocol_decode(const uint8_t in[PACKET_SIZE], uart_packet_t *out);
 
 void protocol_parser_reset(protocol_parser_t *parser);
 bool protocol_parser_feed(protocol_parser_t *parser, uint8_t byte, uart_packet_t *out);
+
+bool protocol_pack_mouse(const mouse_abs_report_t *report, uint8_t payload[PACKET_PAYLOAD_LEN]);
+bool protocol_unpack_mouse(const uint8_t payload[PACKET_PAYLOAD_LEN], mouse_abs_report_t *report);
+
+void protocol_pack_heartbeat(uint8_t payload[PACKET_PAYLOAD_LEN],
+                             uint8_t role,
+                             uint8_t active_output,
+                             uint32_t generation);
+bool protocol_unpack_heartbeat(const uint8_t payload[PACKET_PAYLOAD_LEN],
+                               uint8_t *role,
+                               uint8_t *active_output,
+                               uint32_t *generation,
+                               uint8_t *version);
+
+bool protocol_selftest(void);

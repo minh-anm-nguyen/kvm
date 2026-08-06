@@ -2,8 +2,10 @@
 
 #include <string.h>
 
+#include "config.h"
 #include "keyboard.h"
 #include "mouse.h"
+#include "protocol.h"
 #include "uart.h"
 
 bool router_is_local_active(const device_state_t *state) {
@@ -106,17 +108,8 @@ void router_on_remote_keyboard(device_state_t *state, const uint8_t payload[8]) 
 void router_on_remote_mouse(device_state_t *state, const uint8_t payload[8]) {
     mouse_abs_report_t report;
 
-    memset(&report, 0, sizeof(report));
-    report.buttons = payload[0];
-    report.x = (uint16_t)payload[1] | ((uint16_t)payload[2] << 8);
-    report.y = (uint16_t)payload[3] | ((uint16_t)payload[4] << 8);
-    report.wheel = (int8_t)payload[5];
-
-    if (report.x > (uint16_t)POINTER_MAX) {
-        report.x = (uint16_t)POINTER_MAX;
-    }
-    if (report.y > (uint16_t)POINTER_MAX) {
-        report.y = (uint16_t)POINTER_MAX;
+    if (!protocol_unpack_mouse(payload, &report)) {
+        return;
     }
 
     if (state->board_role == ROLE_A) {
@@ -144,11 +137,26 @@ void router_on_peer_offline(device_state_t *state) {
 }
 
 void router_on_peer_heartbeat(device_state_t *state, const uint8_t payload[8], bool peer_just_online) {
-    uint8_t peer_output = payload[1];
-    uint32_t peer_gen = (uint32_t)payload[2] |
-                        ((uint32_t)payload[3] << 8) |
-                        ((uint32_t)payload[4] << 16) |
-                        ((uint32_t)payload[5] << 24);
+    uint8_t peer_role = 0;
+    uint8_t peer_output = 0;
+    uint32_t peer_gen = 0;
+    uint8_t peer_version = 0;
+
+    if (!protocol_unpack_heartbeat(payload, &peer_role, &peer_output, &peer_gen, &peer_version)) {
+        return;
+    }
+
+    (void)peer_role;
+    state->peer_protocol_version = peer_version;
+
+    if (peer_version != DESKHOP_PROTOCOL_VERSION) {
+        state->peer_protocol_ok = false;
+        state->protocol_mismatch = true;
+        return;
+    }
+
+    state->peer_protocol_ok = true;
+    state->protocol_mismatch = false;
 
     if (peer_output > OUTPUT_B) {
         return;

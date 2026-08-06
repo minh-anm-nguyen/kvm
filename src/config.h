@@ -58,6 +58,10 @@
 #define PACKET_PREAMBLE_0 0xAA
 #define PACKET_PREAMBLE_1 0x55
 #define PACKET_SIZE       12
+#define DESKHOP_PROTOCOL_VERSION 2
+
+/* LED mismatch blink (protocol v1/v2) */
+#define LED_PROTOCOL_MISMATCH_MS 100
 
 /* USB device */
 #define USB_HID_POLL_MS 10
