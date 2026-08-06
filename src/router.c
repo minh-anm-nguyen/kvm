@@ -12,13 +12,40 @@ bool router_is_local_active(const device_state_t *state) {
     return state->active_output == state->board_role;
 }
 
+/*
+ * Build the eight-byte body of MSG_SELECT_OUTPUT.
+ *
+ * Purpose:
+ *   Carry one output-selection decision and its generation between boards, or
+ *   create the same payload locally before passing it to router_on_select_output().
+ *   The generation lets the receiver reject a stale selection packet.
+ *
+ * Input:
+ *   payload  caller-provided PACKET_PAYLOAD_LEN-byte output buffer.
+ *   output   requested active output: OUTPUT_A or OUTPUT_B.
+ *   gen      version of that output-selection decision.
+ *
+ * Output layout:
+ *   [0] output, [1..4] generation (little-endian), [5..7] reserved zero.
+ */
 static void pack_select_payload(uint8_t payload[PACKET_PAYLOAD_LEN], uint8_t output, uint32_t gen) {
     memset(payload, 0, PACKET_PAYLOAD_LEN);
+    /* Initialize reserved bytes to zero before writing the meaningful fields. */
+
     payload[0] = output;
+    /* The output the receiving router should make active. */
+
     payload[1] = (uint8_t)(gen & 0xFF);
+    /* Generation byte 0: least-significant byte. */
+
     payload[2] = (uint8_t)((gen >> 8) & 0xFF);
+    /* Generation byte 1. */
+
     payload[3] = (uint8_t)((gen >> 16) & 0xFF);
+    /* Generation byte 2. */
+
     payload[4] = (uint8_t)((gen >> 24) & 0xFF);
+    /* Generation byte 3: most-significant byte, completing little-endian. */
 }
 
 static uint32_t unpack_gen(const uint8_t payload[PACKET_PAYLOAD_LEN]) {
@@ -28,166 +55,403 @@ static uint32_t unpack_gen(const uint8_t payload[PACKET_PAYLOAD_LEN]) {
            ((uint32_t)payload[4] << 24);
 }
 
+/*
+ * Queue the current local output-selection state for delivery to the peer as
+ * MSG_SELECT_OUTPUT.
+ *
+ * Purpose:
+ *   Synchronize a peer after a local switch, reconnect, or heartbeat-based
+ *   conflict recovery.  The peer applies the payload through
+ *   router_on_select_output().
+ *
+ * Input:
+ *   state      supplies the already-decided active_output and its generation.
+ *
+ * Output:
+ *   A complete MSG_SELECT_OUTPUT packet is queued for UART transmission.
+ *   This function does not change active_output or increment generation; its
+ *   caller must make that decision before broadcasting it.
+ */
 void router_broadcast_active_output(device_state_t *state) {
     uint8_t payload[PACKET_PAYLOAD_LEN];
+    /* Stack buffer for the eight-byte MSG_SELECT_OUTPUT payload. */
+
     pack_select_payload(payload, state->active_output, state->output_generation);
+    /* Serialize the current output choice and generation into the payload. */
+
     uart_queue_packet(MSG_SELECT_OUTPUT, payload);
+    /* Add UART framing/checksum and enqueue the packet for the peer. */
 }
 
+/*
+ * Release all input state owned by this board that is currently applied to an
+ * output which is about to lose control.
+ *
+ * Purpose:
+ *   Ensure the old PC receives keyboard and mouse-button releases before an
+ *   output switch changes routing, preventing stuck keys and stuck buttons.
+ *
+ * Input:
+ *   state   identifies the executing board and supplies pointer state.
+ *   output  the old active output to release.
+ *
+ * Output:
+ *   Queues release reports locally when this board owns the old PC, or sends
+ *   only the input type owned by this board over UART when the old PC is remote.
+ *   Keyboard originates on A; mouse originates on B.
+ */
 static void release_output(device_state_t *state, uint8_t output) {
     hid_keyboard_report_t empty_kbd = {0};
+    /* An all-zero keyboard report releases every key. */
+
     mouse_abs_report_t empty_mouse;
+    /* Filled only when board B must send a remote mouse-button release. */
 
     if (output == state->board_role) {
+        /* The old PC is attached to this board, so release both local HID paths. */
         keyboard_queue_local(&empty_kbd);
         mouse_release_local();
+        /* No UART release is needed because this board owns the old output. */
         return;
     }
 
     if (state->board_role == ROLE_A && output == OUTPUT_B) {
+        /* PC B is remote from A; A owns keyboard input, so release it over UART. */
         uart_queue_keyboard(&empty_kbd);
     }
 
     if (state->board_role == ROLE_B && output == OUTPUT_A) {
+        /* PC A is remote from B; B owns mouse input, so release it over UART. */
         mouse_build_report(state, 0, 0, &empty_mouse);
+        /* Keep the current absolute position but clear all mouse buttons and wheel. */
+
         uart_queue_mouse(&empty_mouse);
     }
 }
 
+/*
+ * Make a locally initiated output-selection decision.
+ *
+ * Purpose:
+ *   Safely move keyboard and mouse routing from the current PC to new_output.
+ *   Input releases are queued before active_output changes, so they cannot be
+ *   accidentally routed to the newly selected PC.
+ *
+ * Input:
+ *   state        local shared device state.
+ *   new_output   requested destination: OUTPUT_A or OUTPUT_B.
+ *   notify_peer  true when this board owns the decision and must advertise it.
+ *
+ * Output:
+ *   Updates active_output after releasing the old output.  With notify_peer,
+ *   increments output_generation and queues MSG_SELECT_OUTPUT for the peer.
+ *   Passing false performs only the local state change and sends nothing.
+ */
 void router_set_active_output(device_state_t *state, uint8_t new_output, bool notify_peer) {
     if (new_output > OUTPUT_B) {
+        /* Reject values outside the two valid outputs before touching state. */
         return;
     }
 
     uint8_t old = state->active_output;
+    /* Preserve the current output so its input state can be released first. */
 
     if (old != new_output) {
+        /* A real switch is required: release reports must use the old route. */
         release_output(state, old);
+
         state->active_output = new_output;
+        /* Only after release, direct subsequent keyboard and mouse reports here. */
     }
 
     if (notify_peer) {
+        /* This also broadcasts when old == new_output, if the caller requests it. */
+        /* Mark this local decision newer than every previously known one. */
         state->output_generation++;
+
         router_broadcast_active_output(state);
+        /* Send the current output and its new generation to the peer. */
     }
 }
 
+/*
+ * Apply an output-selection decision received from the peer.
+ *
+ * Purpose:
+ *   Keep both boards' active_output and output_generation synchronized after
+ *   a peer switch, reconnect, or heartbeat-based recovery.  This is the
+ *   receiving counterpart to router_set_active_output().
+ *
+ * Input:
+ *   state    local shared device state to synchronize.
+ *   payload  MSG_SELECT_OUTPUT body: [0] output, [1..4] generation in
+ *            little-endian order, and reserved zero bytes thereafter.
+ *
+ * Output:
+ *   Rejects an invalid output or stale generation.  Otherwise releases local
+ *   input if the old output belongs to this board, then updates active_output
+ *   and output_generation.  It does not increment generation or reply to peer.
+ */
 void router_on_select_output(device_state_t *state, const uint8_t payload[8]) {
     uint8_t new_output = payload[0];
+    /* Read the output peer selected: OUTPUT_A or OUTPUT_B. */
+
     uint32_t gen = unpack_gen(payload);
+    /* Decode the selection decision's little-endian generation. */
 
     if (new_output > OUTPUT_B) {
+        /* Reject malformed output values before modifying local state. */
         return;
     }
 
     if (gen < state->output_generation) {
+        /* A delayed packet must not overwrite the newer local decision. */
         return;
     }
 
     uint8_t old = state->active_output;
+    /* Keep the old value to decide whether this board must release its PC. */
+
     if (old != new_output && old == state->board_role) {
+        /* The output is changing away from the PC attached to this board. */
         hid_keyboard_report_t empty_kbd = {0};
+        /* All-zero report releases any locally held keyboard keys. */
+
         keyboard_queue_local(&empty_kbd);
+
         mouse_release_local();
+        /* Release both local HID paths before routing switches elsewhere. */
     }
 
     state->active_output = new_output;
+    /* Adopt the peer's selected destination for subsequent routing. */
+
     state->output_generation = gen;
+    /* Record the generation that authorized this state update. */
 }
 
+/*
+ * Receive the keyboard report sent from board A over UART and, when PC B is
+ * active, forward it to board B's local USB device.
+ *
+ * Purpose:
+ *   Board A owns the physical keyboard.  This function is the board-B side of
+ *   the keyboard path when routing selects PC B.
+ *
+ * Input:
+ *   state    local shared device state.
+ *   payload  MSG_KEYBOARD_REPORT body, whose bytes match hid_keyboard_report_t.
+ *
+ * Output:
+ *   Always records the latest peer keyboard state in remote_keyboard.  Queues
+ *   that report to the local USB keyboard only on board B while OUTPUT_B is
+ *   active; otherwise it produces no USB output.
+ */
 void router_on_remote_keyboard(device_state_t *state, const uint8_t payload[8]) {
     hid_keyboard_report_t report;
+    /* Local representation of the fixed-size keyboard payload. */
+
     memcpy(&report, payload, sizeof(report));
+    /* Copy the payload bytes into the HID keyboard-report layout. */
+
     state->remote_keyboard = report;
+    /* Preserve the most recent keyboard state received from board A. */
 
     if (state->board_role == ROLE_B && state->active_output == OUTPUT_B) {
+        /* PC B is active and attached locally: forward the report over USB. */
         keyboard_queue_local(&report);
     }
 }
 
+/*
+ * Receive an absolute mouse report from board B and, while PC A is active,
+ * forward it to board A's local USB device.
+ *
+ * Purpose:
+ *   Board B owns the physical mouse and its pointer accumulator.  This
+ *   function is the board-A side of that mouse path when routing selects PC A.
+ *
+ * Input:
+ *   state    local shared device state.
+ *   payload  MSG_MOUSE_REPORT v2 body: buttons, absolute X/Y, wheel, and
+ *            two zero reserved bytes.
+ *
+ * Output:
+ *   Invalid payloads produce no effect.  Board A records a mirror of the
+ *   received button and position state, then queues the report for local USB
+ *   only while OUTPUT_A is active.  Board B ignores received mouse packets to
+ *   avoid routing the same physical-mouse input twice.
+ */
 void router_on_remote_mouse(device_state_t *state, const uint8_t payload[8]) {
     mouse_abs_report_t report;
+    /* Decoded absolute mouse report, populated only after protocol validation. */
 
     if (!protocol_unpack_mouse(payload, &report)) {
+        /* Reject bad reserved bytes or coordinates outside the absolute range. */
         return;
     }
 
     if (state->board_role == ROLE_A) {
+        /* Only board A consumes mouse reports received from board B. */
         state->mouse_buttons = report.buttons;
+        /* Keep a mirror of the latest button state for release handling. */
+
         state->pointer_x = (int32_t)report.x;
         state->pointer_y = (int32_t)report.y;
+        /* Mirror B's already-accumulated absolute pointer position; do not recalculate it. */
+
         if (state->active_output == OUTPUT_A) {
+            /* PC A is currently selected and is attached to this board. */
             mouse_queue_local(&report);
         }
     }
 }
 
+/*
+ * Fail safely after UART timeout declares the peer offline.
+ *
+ * Purpose:
+ *   Release input state that normally originates on the missing peer, so its
+ *   last keyboard keys or mouse buttons cannot remain stuck on the local PC.
+ *
+ * Input:
+ *   state  local shared state.  The UART timeout layer has already marked the
+ *          peer offline and reset its parser before calling this function.
+ *
+ * Output:
+ *   Clears the cached remote keyboard state.  Board B queues an all-key-up
+ *   report because keyboard originates on A; board A clears and releases mouse
+ *   buttons because mouse originates on B.  It does not change output routing.
+ */
 void router_on_peer_offline(device_state_t *state) {
     hid_keyboard_report_t empty_kbd = {0};
+    /* All-zero keyboard report releases every key. */
+
     memset(&state->remote_keyboard, 0, sizeof(state->remote_keyboard));
+    /* Do not retain keyboard state received before the peer disappeared. */
 
     if (state->board_role == ROLE_B) {
+        /* Board B loses board A, which is the keyboard-input owner. */
         keyboard_queue_local(&empty_kbd);
+        /* Release any A-originated keyboard state currently applied to PC B. */
     }
 
     if (state->board_role == ROLE_A) {
+        /* Board A loses board B, which is the mouse-input owner. */
         state->mouse_buttons = 0;
+        /* Clear the local mirror before producing the USB mouse release. */
+
         mouse_release_local();
+        /* Release any B-originated mouse buttons currently applied to PC A. */
     }
 }
 
+/*
+ * Process a peer heartbeat, verify protocol compatibility, and reconcile the
+ * two boards' output-selection state.
+ *
+ * Purpose:
+ *   Heartbeats carry the peer's active output, generation, and protocol
+ *   version.  This handler prevents incompatible mouse traffic and converges
+ *   both boards after a missed switch, reboot, reconnect, or state conflict.
+ *
+ * Input:
+ *   state             local shared device state.
+ *   payload           heartbeat body: role, active output, generation, and
+ *                     protocol version.
+ *   peer_just_online  true only for the first packet after peer reconnect.
+ *
+ * Output:
+ *   Updates peer protocol flags and may apply the peer's selection or queue a
+ *   local MSG_SELECT_OUTPUT.  Generation comparison wins first; if generation
+ *   ties but outputs differ, board A is the deterministic authority.
+ */
 void router_on_peer_heartbeat(device_state_t *state, const uint8_t payload[8], bool peer_just_online) {
     uint8_t peer_role = 0;
+    /* Role reported by the peer; currently decoded for protocol completeness. */
+
     uint8_t peer_output = 0;
+    /* Output the peer currently considers active. */
+
     uint32_t peer_gen = 0;
+    /* Version of the peer's output-selection decision. */
+
     uint8_t peer_version = 0;
+    /* Protocol version used by the peer to encode its mouse payload. */
 
     if (!protocol_unpack_heartbeat(payload, &peer_role, &peer_output, &peer_gen, &peer_version)) {
+        /* Ignore a payload that could not be decoded safely. */
         return;
     }
 
     (void)peer_role;
+    /* Role is not yet used to validate that the peer has the opposite role. */
+
     state->peer_protocol_version = peer_version;
+    /* Retain the observed version for diagnostics and LED state. */
 
     if (peer_version != DESKHOP_PROTOCOL_VERSION) {
+        /* Mouse-report meaning is versioned, so incompatible peers cannot mix. */
         state->peer_protocol_ok = false;
+
         state->protocol_mismatch = true;
+
         return;
     }
 
     state->peer_protocol_ok = true;
+    /* Matching versions permit MSG_MOUSE_REPORT to be accepted from the peer. */
+
     state->protocol_mismatch = false;
+    /* Clear any mismatch indicated by an earlier heartbeat. */
 
     if (peer_output > OUTPUT_B) {
+        /* The heartbeat has a compatible version but an invalid output value. */
         return;
     }
 
     if (peer_gen > state->output_generation) {
+        /* Peer has a newer decision, so local state must catch up to it. */
         uint8_t sel[PACKET_PAYLOAD_LEN];
+
         pack_select_payload(sel, peer_output, peer_gen);
+        /* Adapt heartbeat fields to the existing select-output receiver format. */
+
         router_on_select_output(state, sel);
+        /* Apply the peer decision, including any necessary local input release. */
+
         return;
     }
 
     if (peer_gen < state->output_generation) {
+        /* Local state is newer; never overwrite it with the peer's stale view. */
         if (peer_just_online) {
+            /* A rebooted/reconnected peer needs the authoritative local choice. */
             router_broadcast_active_output(state);
         }
+
         return;
     }
 
     if (peer_output != state->active_output) {
+        /* Equal generations but different outputs are a deterministic tie-break. */
         if (state->board_role == ROLE_B) {
+            /* Board B yields to the peer's (board A) state. */
             uint8_t sel[PACKET_PAYLOAD_LEN];
+
             pack_select_payload(sel, peer_output, peer_gen);
+
             router_on_select_output(state, sel);
         } else {
+            /* Board A remains authoritative and tells B to adopt A's state. */
             router_broadcast_active_output(state);
         }
+
         return;
     }
 
     if (peer_just_online) {
+        /* States already match, but confirm the selection to the reconnected peer. */
         router_broadcast_active_output(state);
     }
 }

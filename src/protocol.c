@@ -142,19 +142,51 @@ bool protocol_unpack_mouse(const uint8_t payload[PACKET_PAYLOAD_LEN], mouse_abs_
     return true;
 }
 
+/*
+ * Serialize the local board's link state into the fixed eight-byte heartbeat
+ * payload.  This function only writes the payload; uart_queue_packet() later
+ * adds framing, type, and checksum before transmission.
+ *
+ * Input:
+ *   payload        caller-provided buffer with PACKET_PAYLOAD_LEN bytes.
+ *   role           local board role: ROLE_A or ROLE_B.
+ *   active_output  PC currently selected to receive keyboard and mouse.
+ *   generation     monotonically increasing version of the output decision.
+ *
+ * Output layout:
+ *   [0] role, [1] active output, [2..5] generation (little-endian),
+ *   [6] protocol version, [7] reserved zero.
+ */
 void protocol_pack_heartbeat(uint8_t payload[PACKET_PAYLOAD_LEN],
                              uint8_t role,
                              uint8_t active_output,
                              uint32_t generation) {
     memset(payload, 0, PACKET_PAYLOAD_LEN);
+    /* Clear the payload, including the reserved byte, before populating it. */
+
     payload[0] = role;
+    /* Identify whether the sender is board A or board B. */
+
     payload[1] = active_output;
+    /* Tell the peer which PC this board considers active. */
+
     payload[2] = (uint8_t)(generation & 0xFF);
+    /* Generation byte 0: least-significant byte. */
+
     payload[3] = (uint8_t)((generation >> 8) & 0xFF);
+    /* Generation byte 1. */
+
     payload[4] = (uint8_t)((generation >> 16) & 0xFF);
+    /* Generation byte 2. */
+
     payload[5] = (uint8_t)((generation >> 24) & 0xFF);
+    /* Generation byte 3: most-significant byte, completing little-endian. */
+
     payload[6] = (uint8_t)DESKHOP_PROTOCOL_VERSION;
+    /* Allow the peer to reject incompatible mouse-payload formats. */
+
     payload[7] = 0;
+    /* Reserved by the protocol and always transmitted as zero. */
 }
 
 bool protocol_unpack_heartbeat(const uint8_t payload[PACKET_PAYLOAD_LEN],

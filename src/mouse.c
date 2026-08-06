@@ -144,64 +144,159 @@ void mouse_init(void) {
     s_last_wheel = 0;
 }
 
+/*
+ * Decode the relative fields this firmware accepts from a USB HID boot-mouse
+ * input report.
+ *
+ * Input:
+ *   raw[0]     button bitmap
+ *   raw[1]     signed relative X delta (dx)
+ *   raw[2]     signed relative Y delta (dy)
+ *   raw[3]     optional signed vertical-wheel delta
+ *   len        number of bytes available in raw; a report needs at least
+ *              button, X, and Y bytes to be useful.
+ *
+ * Output:
+ *   out        receives the decoded relative mouse report.  The caller turns
+ *              these relative deltas into the absolute pointer position used
+ *              by the rest of the firmware.
+ *
+ * Return value:
+ *   true       raw was valid and out was populated.
+ *   false      a required pointer was NULL or the report was too short.
+ */
 static bool parse_boot_mouse(const uint8_t *raw, uint16_t len, mouse_rel_report_t *out) {
     if (raw == NULL || out == NULL || len < 3) {
+        /* Need an input buffer, an output object, and buttons + X + Y. */
         return false;
     }
 
+    /* Byte 0 is copied as-is because each bit represents a mouse button. */
     out->buttons = raw[0];
+
+    /* Bytes 1 and 2 are signed relative movements, not absolute positions. */
     out->x = (int8_t)raw[1];
     out->y = (int8_t)raw[2];
+
+    /* Wheel is optional; three-byte reports have no wheel field. */
     out->wheel = (len >= 4) ? (int8_t)raw[3] : 0;
+
     return true;
 }
 
+/*
+ * Route one absolute mouse report from the board-B mouse owner to the active
+ * PC.
+ *
+ * Input:
+ *   state      shared device state.  board_role identifies which board is
+ *              executing and active_output identifies the selected PC.
+ *   report     absolute X/Y position plus button and wheel state, built after
+ *              the relative boot-mouse movement has been accumulated.
+ *
+ * Output:
+ *   When B is active, queue report for the local USB device on board B.
+ *   When A is active, queue MSG_MOUSE_REPORT for UART delivery to board A.
+ *   Repeated reports produce no output, avoiding redundant USB/UART traffic.
+ *
+ * Only board B routes mouse input because it is the sole owner of the
+ * physical mouse and of the accumulated pointer coordinates.
+ */
 static void mouse_route_absolute(device_state_t *state, const mouse_abs_report_t *report) {
     if (state->board_role != ROLE_B) {
+        /* Board A receives remote reports; it must not create a second route. */
         return;
     }
 
     if (report_unchanged(report)) {
+        /* Buttons, X, Y, and wheel are unchanged, so no output is needed. */
         return;
     }
+
+    /* Remember the report before routing so the next identical one is skipped. */
     remember_report(report);
 
     if (state->active_output == OUTPUT_B) {
+        /* PC B is active: its USB device is attached to this board. */
         mouse_queue_local(report);
     } else {
+        /* PC A is active: send the absolute report to board A over UART. */
         uart_queue_mouse(report);
     }
 }
 
+/*
+ * Convert one relative boot-mouse event into the absolute report consumed by
+ * the routing layer.
+ *
+ * Input:
+ *   state      valid shared device state.  Board B owns pointer_x/pointer_y.
+ *   dx, dy     signed relative movement from the physical boot mouse.
+ *   buttons    current button bitmap from that report.
+ *   wheel      signed vertical-wheel delta from that report.
+ *
+ * Output:
+ *   Updates board B's accumulated absolute pointer position and button state,
+ *   then passes a mouse_abs_report_t to mouse_route_absolute().  That next
+ *   step queues it for local USB or UART depending on active_output.
+ *
+ * Board A never performs this conversion: accepting movement there would give
+ * the two boards independent pointer accumulators that could drift apart.
+ */
 static void mouse_process_relative(device_state_t *state,
                                    int8_t dx,
                                    int8_t dy,
                                    uint8_t buttons,
                                    int8_t wheel) {
     if (state->board_role != ROLE_B) {
+        /* Only board B owns the physical mouse and pointer accumulator. */
         return;
     }
 
+    /* Scale dx/dy, add them to X/Y, then clamp within the absolute HID range. */
     mouse_pointer_advance(&state->pointer_x, &state->pointer_y, dx, dy);
+
+    /* Retain the latest button state for change detection and release handling. */
     state->mouse_buttons = buttons;
 
     mouse_abs_report_t report;
+    /* Build an 8-byte absolute report from the updated state and wheel delta. */
     mouse_build_report(state, buttons, wheel, &report);
+
+    /* Route it to PC B locally or to PC A through UART. */
     mouse_route_absolute(state, &report);
 }
 
+/*
+ * Accept one raw USB HID mouse report from the host callback and start the
+ * relative-to-absolute mouse pipeline.
+ *
+ * Input:
+ *   raw        bytes supplied by TinyUSB for the boot-mouse input report.
+ *   len        number of valid bytes in raw.
+ *
+ * Output:
+ *   No direct return value.  A valid report with a movement, wheel, or button
+ *   change is forwarded to mouse_process_relative(), which updates pointer
+ *   state and eventually queues USB or UART output.  Repeated idle reports
+ *   are intentionally discarded.
+ */
 void mouse_on_report(const uint8_t *raw, uint16_t len) {
     mouse_rel_report_t report;
+    /* Temporary decoded boot-mouse data: buttons, relative X/Y, and wheel. */
 
     if (!parse_boot_mouse(raw, len, &report)) {
+        /* Reject NULL or undersized raw HID reports before reading their fields. */
         return;
     }
 
     if (report.x == 0 && report.y == 0 && report.wheel == 0 &&
         report.buttons == g_state.mouse_buttons) {
+        /* Nothing changed since the previous state, so avoid redundant output. */
         return;
     }
 
+    /* Convert the relative event to an absolute report and route it onward. */
     mouse_process_relative(&g_state, report.x, report.y, report.buttons, report.wheel);
 }
 
@@ -210,20 +305,39 @@ void mouse_on_unmount(void) {
     mouse_process_relative(&g_state, 0, 0, 0, 0);
 }
 
+/*
+ * Drain at most one pending absolute mouse report from the local USB-output
+ * queue.  main() calls this task repeatedly, so retaining an unsent report
+ * lets a later iteration retry after USB becomes available.
+ *
+ * Input:
+ *   state      currently unused; kept in the task interface so it matches the
+ *              other device tasks and can accept future state-based policy.
+ *   s_tx_q     internal queue populated by mouse_queue_local().
+ *
+ * Output:
+ *   On a mounted, ready HID mouse interface, sends one report to the local
+ *   PC and removes it from s_tx_q only after usb_device_send_mouse() succeeds.
+ */
 void mouse_task(device_state_t *state) {
     mouse_abs_report_t report;
+
     if (!queue_peek(&report)) {
+        /* Queue is empty: there is no local USB mouse report to send. */
         return;
     }
 
     if (!tud_mounted() || !tud_hid_n_ready(ITF_NUM_MOUSE)) {
+        /* Keep the report queued until the USB device is mounted and ready. */
         return;
     }
 
     if (usb_device_send_mouse(&report)) {
+        /* Remove it only after TinyUSB accepted the HID report. */
         queue_pop();
     }
 
+    /* State is intentionally unused by the current queue-draining policy. */
     (void)state;
 }
 
