@@ -62,10 +62,12 @@
 /* USB device */
 #define USB_HID_POLL_MS 10
 
-/* Absolute pointer logical range (HID abs mouse + future edge switch) */
+/* Absolute pointer logical range (HID abs mouse + edge switch) */
 #define POINTER_MIN       0
 #define POINTER_MAX       32767
 #define POINTER_CENTER    16384
 #define POINTER_ENTRY_GAP 32
+#define POINTER_SCALE_X   24
+#define POINTER_SCALE_Y   24
 
 #define ENABLE_EDGE_SWITCHING 1

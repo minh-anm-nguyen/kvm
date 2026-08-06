@@ -34,7 +34,7 @@ void router_broadcast_active_output(device_state_t *state) {
 
 static void release_output(device_state_t *state, uint8_t output) {
     hid_keyboard_report_t empty_kbd = {0};
-    mouse_rel_report_t empty_mouse = {0};
+    mouse_abs_report_t empty_mouse;
 
     if (output == state->board_role) {
         keyboard_queue_local(&empty_kbd);
@@ -47,6 +47,7 @@ static void release_output(device_state_t *state, uint8_t output) {
     }
 
     if (state->board_role == ROLE_B && output == OUTPUT_A) {
+        mouse_build_report(state, 0, 0, &empty_mouse);
         uart_queue_mouse(&empty_mouse);
     }
 }
@@ -103,18 +104,27 @@ void router_on_remote_keyboard(device_state_t *state, const uint8_t payload[8]) 
 }
 
 void router_on_remote_mouse(device_state_t *state, const uint8_t payload[8]) {
-    mouse_rel_report_t report;
+    mouse_abs_report_t report;
+
+    memset(&report, 0, sizeof(report));
     report.buttons = payload[0];
-    report.x = (int8_t)payload[1];
-    report.y = (int8_t)payload[2];
-    report.wheel = (int8_t)payload[3];
+    report.x = (uint16_t)payload[1] | ((uint16_t)payload[2] << 8);
+    report.y = (uint16_t)payload[3] | ((uint16_t)payload[4] << 8);
+    report.wheel = (int8_t)payload[5];
+
+    if (report.x > (uint16_t)POINTER_MAX) {
+        report.x = (uint16_t)POINTER_MAX;
+    }
+    if (report.y > (uint16_t)POINTER_MAX) {
+        report.y = (uint16_t)POINTER_MAX;
+    }
 
     if (state->board_role == ROLE_A) {
         state->mouse_buttons = report.buttons;
+        state->pointer_x = (int32_t)report.x;
+        state->pointer_y = (int32_t)report.y;
         if (state->active_output == OUTPUT_A) {
-            mouse_abs_report_t abs;
-            mouse_abs_from_rel(&report, &abs);
-            mouse_queue_local(&abs);
+            mouse_queue_local(&report);
         }
     }
 }

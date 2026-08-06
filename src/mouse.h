@@ -22,10 +22,21 @@ typedef struct __attribute__((packed)) {
 
 _Static_assert(sizeof(mouse_abs_report_t) == 8, "mouse_abs_report_t must be 8 bytes");
 
+int32_t mouse_scale_delta(int8_t delta, int32_t scale);
+int32_t mouse_clamp(int32_t value, int32_t lo, int32_t hi);
+void mouse_pointer_advance(int32_t *pointer_x,
+                           int32_t *pointer_y,
+                           int8_t dx,
+                           int8_t dy);
+
 void mouse_init(void);
 void mouse_on_report(const uint8_t *raw, uint16_t len);
 void mouse_on_unmount(void);
 void mouse_task(device_state_t *state);
 void mouse_queue_local(const mouse_abs_report_t *report);
 void mouse_release_local(void);
-void mouse_abs_from_rel(const mouse_rel_report_t *rel, mouse_abs_report_t *out);
+void mouse_build_report(const device_state_t *state,
+                        uint8_t buttons,
+                        int8_t wheel,
+                        mouse_abs_report_t *out);
+bool mouse_pointer_selftest(void);

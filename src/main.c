@@ -15,6 +15,14 @@ int main(void) {
     keyboard_init();
     mouse_init();
 
+#ifdef KVM_DEBUG
+    if (!mouse_pointer_selftest()) {
+        while (true) {
+            tight_loop_contents();
+        }
+    }
+#endif
+
     usb_host_init();
     usb_device_init();
     uart_link_init(g_state.board_role);

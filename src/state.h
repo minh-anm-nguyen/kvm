@@ -22,6 +22,9 @@ typedef struct {
     hid_keyboard_report_t remote_keyboard;
 
     uint8_t  mouse_buttons;
+    int32_t  pointer_x;
+    int32_t  pointer_y;
+    bool     edge_switch_armed;
     uint32_t last_peer_heartbeat_ms;
     uint32_t output_generation;
 

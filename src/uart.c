@@ -112,15 +112,19 @@ bool uart_queue_keyboard(const hid_keyboard_report_t *report) {
     return uart_queue_packet(MSG_KEYBOARD_REPORT, payload);
 }
 
-bool uart_queue_mouse(const mouse_rel_report_t *report) {
+bool uart_queue_mouse(const mouse_abs_report_t *report) {
     if (report == NULL) {
         return false;
     }
     uint8_t payload[PACKET_PAYLOAD_LEN] = {0};
     payload[0] = report->buttons;
-    payload[1] = (uint8_t)report->x;
-    payload[2] = (uint8_t)report->y;
-    payload[3] = (uint8_t)report->wheel;
+    payload[1] = (uint8_t)(report->x & 0xFF);
+    payload[2] = (uint8_t)((report->x >> 8) & 0xFF);
+    payload[3] = (uint8_t)(report->y & 0xFF);
+    payload[4] = (uint8_t)((report->y >> 8) & 0xFF);
+    payload[5] = (uint8_t)report->wheel;
+    payload[6] = 0;
+    payload[7] = 0;
     return uart_queue_packet(MSG_MOUSE_REPORT, payload);
 }
 

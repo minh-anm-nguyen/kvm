@@ -26,6 +26,9 @@ void board_init(device_state_t *state) {
     state->mouse_dev_addr   = 0;
     state->mouse_instance   = 0;
     state->mouse_buttons    = 0;
+    state->pointer_x        = POINTER_CENTER;
+    state->pointer_y        = POINTER_CENTER;
+    state->edge_switch_armed = true;
     state->last_peer_heartbeat_ms = 0;
     state->output_generation = 0;
     state->led_on = false;
