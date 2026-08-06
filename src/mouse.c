@@ -84,19 +84,45 @@ static void remember_report(const mouse_abs_report_t *report) {
     s_have_last = true;
 }
 
+/*
+ * Append an absolute mouse report to the fixed-size circular queue consumed by
+ * mouse_task().
+ *
+ * Purpose:
+ *   Decouple mouse routing from USB HID readiness.  Reports can be produced
+ *   while the USB endpoint is busy and sent later by the task loop.
+ *
+ * Input:
+ *   report  non-NULL absolute mouse report to copy into the queue.
+ *
+ * Output:
+ *   Updates s_tx_q and always returns true.  On overflow, normal movement
+ *   drops the oldest report, while a button-release report replaces the front
+ *   entry so the release is transmitted next and is not lost.
+ */
 static bool queue_push(const mouse_abs_report_t *report) {
     if (s_tx_q.count >= MOUSE_TX_QUEUE_LEN) {
+        /* Queue is full: apply the overflow policy before appending. */
         if (report->buttons == 0) {
+            /* Releases are safety-critical; make this report the next one sent. */
             s_tx_q.items[s_tx_q.head] = *report;
             return true;
         }
+
+        /* For ordinary movement, discard the oldest queued report. */
         s_tx_q.head = (uint8_t)((s_tx_q.head + 1) % MOUSE_TX_QUEUE_LEN);
         s_tx_q.count--;
     }
 
     s_tx_q.items[s_tx_q.tail] = *report;
+    /* Copy the report into the current write slot. */
+
     s_tx_q.tail = (uint8_t)((s_tx_q.tail + 1) % MOUSE_TX_QUEUE_LEN);
+    /* Advance tail with wraparound to preserve the ring-buffer layout. */
+
     s_tx_q.count++;
+    /* Account for the new queued report. */
+
     return true;
 }
 
