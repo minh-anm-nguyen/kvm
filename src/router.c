@@ -2,6 +2,7 @@
 
 #include <string.h>
 
+#include "board.h"
 #include "config.h"
 #include "keyboard.h"
 #include "mouse.h"
@@ -474,91 +475,73 @@ void router_on_peer_offline(device_state_t *state) {
  *   ties but outputs differ, board A is the deterministic authority.
  */
 void router_on_peer_heartbeat(device_state_t *state, const uint8_t payload[8], bool peer_just_online) {
-    uint8_t peer_role = 0;
-    /* Role reported by the peer; currently decoded for protocol completeness. */
-
+    uint8_t peer_role_raw = 0;
     uint8_t peer_output = 0;
-    /* Output the peer currently considers active. */
-
     uint32_t peer_gen = 0;
-    /* Version of the peer's output-selection decision. */
-
     uint8_t peer_version = 0;
-    /* Protocol version used by the peer to encode its mouse payload. */
 
-    if (!protocol_unpack_heartbeat(payload, &peer_role, &peer_output, &peer_gen, &peer_version)) {
-        /* Ignore a payload that could not be decoded safely. */
+    if (!protocol_unpack_heartbeat(payload, &peer_role_raw, &peer_output, &peer_gen, &peer_version)) {
         return;
     }
 
-    (void)peer_role;
-    /* Role is not yet used to validate that the peer has the opposite role. */
-
     state->peer_protocol_version = peer_version;
-    /* Retain the observed version for diagnostics and LED state. */
 
     if (peer_version != DESKHOP_PROTOCOL_VERSION) {
-        /* Mouse-report meaning is versioned, so incompatible peers cannot mix. */
         state->peer_protocol_ok = false;
-
+        state->peer_role_validated = false;
         state->protocol_mismatch = true;
+        return;
+    }
 
+    state->protocol_mismatch = false;
+
+    if (!board_role_is_concrete((board_role_t)peer_role_raw)) {
+        state->peer_protocol_ok = false;
+        state->peer_role_validated = false;
+        return;
+    }
+
+    state->peer_role = (board_role_t)peer_role_raw;
+
+    if (!board_role_is_peer_of(state->board_role, state->peer_role)) {
+        state->peer_protocol_ok = false;
+        state->peer_role_validated = false;
         return;
     }
 
     state->peer_protocol_ok = true;
-    /* Matching versions permit MSG_MOUSE_REPORT to be accepted from the peer. */
-
-    state->protocol_mismatch = false;
-    /* Clear any mismatch indicated by an earlier heartbeat. */
+    state->peer_role_validated = true;
 
     if (peer_output > OUTPUT_B) {
-        /* The heartbeat has a compatible version but an invalid output value. */
         return;
     }
 
     if (peer_gen > state->output_generation) {
-        /* Peer has a newer decision, so local state must catch up to it. */
         uint8_t sel[PACKET_PAYLOAD_LEN];
-
         pack_select_payload(sel, peer_output, peer_gen, SWITCH_REASON_NONE);
-        /* Adapt heartbeat fields to the existing select-output receiver format. */
-
         router_on_select_output(state, sel);
-        /* Apply the peer decision, including any necessary local input release. */
-
         return;
     }
 
     if (peer_gen < state->output_generation) {
-        /* Local state is newer; never overwrite it with the peer's stale view. */
         if (peer_just_online) {
-            /* A rebooted/reconnected peer needs the authoritative local choice. */
             router_broadcast_active_output(state);
         }
-
         return;
     }
 
     if (peer_output != state->active_output) {
-        /* Equal generations but different outputs are a deterministic tie-break. */
         if (state->board_role == ROLE_B) {
-            /* Board B yields to the peer's (board A) state. */
             uint8_t sel[PACKET_PAYLOAD_LEN];
-
             pack_select_payload(sel, peer_output, peer_gen, SWITCH_REASON_NONE);
-
             router_on_select_output(state, sel);
         } else {
-            /* Board A remains authoritative and tells B to adopt A's state. */
             router_broadcast_active_output(state);
         }
-
         return;
     }
 
     if (peer_just_online) {
-        /* States already match, but confirm the selection to the reconnected peer. */
         router_broadcast_active_output(state);
     }
 }

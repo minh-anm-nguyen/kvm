@@ -181,13 +181,13 @@ static void handle_rx_packet(device_state_t *state, const uart_packet_t *pkt) {
         break;
 
     case MSG_KEYBOARD_REPORT:
-        /* Board B may forward keyboard state received from board A to local USB. */
-        router_on_remote_keyboard(state, pkt->payload);
+        if (state->peer_protocol_ok && state->peer_role_validated) {
+            router_on_remote_keyboard(state, pkt->payload);
+        }
         break;
 
     case MSG_MOUSE_REPORT:
-        if (state->peer_protocol_ok) {
-            /* Only accept absolute mouse payloads after heartbeat version agreement. */
+        if (state->peer_protocol_ok && state->peer_role_validated) {
             router_on_remote_mouse(state, pkt->payload);
         }
         break;
@@ -292,13 +292,10 @@ static void update_peer_timeout(device_state_t *state) {
     /* Publish the offline transition before router safety policy runs. */
 
     state->peer_protocol_ok = false;
-    /* Mouse forwarding is no longer safe until a compatible heartbeat returns. */
-
+    state->peer_role_validated = false;
     state->protocol_mismatch = false;
-    /* Clear the old diagnosis; a future heartbeat will establish a new one. */
-
     state->peer_protocol_version = 0;
-    /* The previous peer version is meaningless while no peer is online. */
+    state->peer_role = BOARD_ROLE_UNKNOWN;
 
     protocol_parser_reset(&s_parser);
     /* Discard an incomplete frame that may have been left by the dead link. */

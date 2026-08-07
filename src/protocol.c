@@ -344,40 +344,24 @@ bool protocol_unpack_mouse(const uint8_t payload[PACKET_PAYLOAD_LEN], mouse_abs_
  *   active_output  PC currently selected to receive keyboard and mouse.
  *   generation     monotonically increasing version of the output decision.
  *
- * Output layout:
- *   [0] role, [1] active output, [2..5] generation (little-endian),
- *   [6] protocol version, [7] reserved zero.
+ * Output layout (protocol v3):
+ *   [0] protocol version, [1] role, [2] active output,
+ *   [3..6] generation (little-endian), [7] reserved zero.
  */
 void protocol_pack_heartbeat(uint8_t payload[PACKET_PAYLOAD_LEN],
                              uint8_t role,
                              uint8_t active_output,
                              uint32_t generation) {
     memset(payload, 0, PACKET_PAYLOAD_LEN);
-    /* Clear the payload, including the reserved byte, before populating it. */
 
-    payload[0] = role;
-    /* Identify whether the sender is board A or board B. */
-
-    payload[1] = active_output;
-    /* Tell the peer which PC this board considers active. */
-
-    payload[2] = (uint8_t)(generation & 0xFF);
-    /* Generation byte 0: least-significant byte. */
-
-    payload[3] = (uint8_t)((generation >> 8) & 0xFF);
-    /* Generation byte 1. */
-
-    payload[4] = (uint8_t)((generation >> 16) & 0xFF);
-    /* Generation byte 2. */
-
-    payload[5] = (uint8_t)((generation >> 24) & 0xFF);
-    /* Generation byte 3: most-significant byte, completing little-endian. */
-
-    payload[6] = (uint8_t)DESKHOP_PROTOCOL_VERSION;
-    /* Allow the peer to reject incompatible mouse-payload formats. */
-
+    payload[0] = (uint8_t)DESKHOP_PROTOCOL_VERSION;
+    payload[1] = role;
+    payload[2] = active_output;
+    payload[3] = (uint8_t)(generation & 0xFF);
+    payload[4] = (uint8_t)((generation >> 8) & 0xFF);
+    payload[5] = (uint8_t)((generation >> 16) & 0xFF);
+    payload[6] = (uint8_t)((generation >> 24) & 0xFF);
     payload[7] = 0;
-    /* Reserved by the protocol and always transmitted as zero. */
 }
 
 bool protocol_unpack_heartbeat(const uint8_t payload[PACKET_PAYLOAD_LEN],
@@ -390,13 +374,18 @@ bool protocol_unpack_heartbeat(const uint8_t payload[PACKET_PAYLOAD_LEN],
         return false;
     }
 
-    *role = payload[0];
-    *active_output = payload[1];
-    *generation = (uint32_t)payload[2] |
-                  ((uint32_t)payload[3] << 8) |
-                  ((uint32_t)payload[4] << 16) |
-                  ((uint32_t)payload[5] << 24);
-    *version = payload[6];
+    *version = payload[0];
+    *role = payload[1];
+    *active_output = payload[2];
+    *generation = (uint32_t)payload[3] |
+                  ((uint32_t)payload[4] << 8) |
+                  ((uint32_t)payload[5] << 16) |
+                  ((uint32_t)payload[6] << 24);
+
+    if (*active_output > OUTPUT_B) {
+        return false;
+    }
+
     return true;
 }
 
@@ -469,12 +458,13 @@ bool protocol_selftest(void) {
         return false;
     }
 
-    /* Heartbeat carries protocol version */
+    /* Heartbeat v3: version, role, output, gen LE, reserved */
     uint8_t hb[PACKET_PAYLOAD_LEN];
     protocol_pack_heartbeat(hb, ROLE_A, OUTPUT_B, 0x01020304u);
-    if (hb[0] != ROLE_A || hb[1] != OUTPUT_B ||
-        hb[2] != 0x04 || hb[3] != 0x03 || hb[4] != 0x02 || hb[5] != 0x01 ||
-        hb[6] != DESKHOP_PROTOCOL_VERSION || hb[7] != 0) {
+    if (hb[0] != DESKHOP_PROTOCOL_VERSION ||
+        hb[1] != ROLE_A || hb[2] != OUTPUT_B ||
+        hb[3] != 0x04 || hb[4] != 0x03 || hb[5] != 0x02 || hb[6] != 0x01 ||
+        hb[7] != 0) {
         return false;
     }
 
@@ -487,6 +477,13 @@ bool protocol_selftest(void) {
     }
     if (role != ROLE_A || output != OUTPUT_B || gen != 0x01020304u ||
         ver != DESKHOP_PROTOCOL_VERSION) {
+        return false;
+    }
+
+    uint8_t bad_out[PACKET_PAYLOAD_LEN];
+    memcpy(bad_out, hb, PACKET_PAYLOAD_LEN);
+    bad_out[2] = 2;
+    if (protocol_unpack_heartbeat(bad_out, &role, &output, &gen, &ver)) {
         return false;
     }
 

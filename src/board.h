@@ -18,6 +18,7 @@ typedef enum {
 } role_probe_result_t;
 
 bool board_role_is_concrete(board_role_t role);
+bool board_role_is_peer_of(board_role_t local, board_role_t peer);
 bool board_accepts_keyboard(board_role_t role);
 bool board_accepts_mouse(board_role_t role);
 const board_pinmap_t *board_get_pinmap(board_role_t role);

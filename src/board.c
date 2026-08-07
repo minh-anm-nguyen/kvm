@@ -42,6 +42,11 @@ bool board_role_is_concrete(board_role_t role) {
     return role == BOARD_ROLE_A || role == BOARD_ROLE_B;
 }
 
+bool board_role_is_peer_of(board_role_t local, board_role_t peer) {
+    return (local == BOARD_ROLE_A && peer == BOARD_ROLE_B) ||
+           (local == BOARD_ROLE_B && peer == BOARD_ROLE_A);
+}
+
 bool board_accepts_keyboard(board_role_t role) {
     return role == BOARD_ROLE_A;
 }
@@ -439,6 +444,14 @@ bool board_ownership_selftest(void) {
         return false;
     }
 
+    if (!board_role_is_peer_of(BOARD_ROLE_A, BOARD_ROLE_B) ||
+        !board_role_is_peer_of(BOARD_ROLE_B, BOARD_ROLE_A) ||
+        board_role_is_peer_of(BOARD_ROLE_A, BOARD_ROLE_A) ||
+        board_role_is_peer_of(BOARD_ROLE_B, BOARD_ROLE_B) ||
+        board_role_is_peer_of(BOARD_ROLE_A, BOARD_ROLE_UNKNOWN)) {
+        return false;
+    }
+
     return true;
 }
 
@@ -459,8 +472,10 @@ void board_init(device_state_t *state) {
     state->pointer_y        = POINTER_CENTER;
     state->edge_switch_armed = true;
     state->peer_protocol_ok = false;
+    state->peer_role_validated = false;
     state->protocol_mismatch = false;
     state->peer_protocol_version = 0;
+    state->peer_role = BOARD_ROLE_UNKNOWN;
     state->last_peer_heartbeat_ms = 0;
     state->output_generation = 0;
     state->wrong_port_led_until_ms = 0;

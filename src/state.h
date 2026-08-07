@@ -27,8 +27,10 @@ typedef struct {
     int32_t  pointer_y;
     bool     edge_switch_armed;
     bool     peer_protocol_ok;
+    bool     peer_role_validated;
     bool     protocol_mismatch;
     uint8_t  peer_protocol_version;
+    board_role_t peer_role;
     uint32_t last_peer_heartbeat_ms;
     uint32_t output_generation;
     uint32_t wrong_port_led_until_ms;
