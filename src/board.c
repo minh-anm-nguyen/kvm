@@ -502,7 +502,11 @@ void board_boot_resolve_role(device_state_t *state) {
     board_role_t role = board_detect_role();
 
     if (!board_role_is_concrete(role)) {
-        role = (board_role_t)BOARD_ROLE;
+#ifdef FORCE_BOARD_ROLE
+        role = (board_role_t)FORCE_BOARD_ROLE;
+#else
+        board_led_probe_error_loop(state);
+#endif
     }
 
     if (!board_role_is_concrete(role)) {

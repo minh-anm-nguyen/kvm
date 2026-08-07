@@ -108,25 +108,14 @@ static uint8_t const desc_configuration[] = {
                        USB_HID_POLL_MS),
 };
 
-#if BOARD_ROLE == ROLE_A
 static char const *const string_desc_arr[] = {
     (const char[]){0x09, 0x04},
     "DeskHop Minimal",
-    "DeskHop Minimal A",
+    "DeskHop Minimal",
     NULL,
     "Keyboard",
     "Mouse",
 };
-#else
-static char const *const string_desc_arr[] = {
-    (const char[]){0x09, 0x04},
-    "DeskHop Minimal",
-    "DeskHop Minimal B",
-    NULL,
-    "Keyboard",
-    "Mouse",
-};
-#endif
 
 static uint16_t _desc_str[32];
 

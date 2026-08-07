@@ -5,10 +5,6 @@
 #include "class/hid/hid.h"
 
 /* ---- Board / output roles ---------------------------------------------- */
-#ifndef BOARD_ROLE
-#error "BOARD_ROLE must be set by the build system (0=A, 1=B)"
-#endif
-
 typedef enum {
     BOARD_ROLE_A        = 0,
     BOARD_ROLE_B        = 1,
@@ -16,7 +12,6 @@ typedef enum {
     BOARD_ROLE_UNKNOWN  = 0xFF,
 } board_role_t;
 
-/* Numeric macros so compile-time #if BOARD_ROLE == ROLE_A still works. */
 #define ROLE_A 0
 #define ROLE_B 1
 

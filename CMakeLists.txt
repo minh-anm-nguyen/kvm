@@ -1,6 +1,7 @@
 cmake_minimum_required(VERSION 3.13)
 
 option(KVM_DEBUG "Enable debug defines and softer optimisation" ON)
+option(KVM_BUILD_FORCED_TARGETS "Build diagnostic deskhop-force-a/b UF2s" ON)
 
 if(KVM_DEBUG)
     set(CMAKE_BUILD_TYPE Debug CACHE STRING "Build type" FORCE)
@@ -78,14 +79,12 @@ set(KVM_COMMON_INCLUDES
     ${PICO_PIO_USB_DIR}/src
 )
 
-function(kvm_add_firmware TARGET_NAME BOARD_ROLE)
+function(kvm_add_firmware TARGET_NAME)
     add_executable(${TARGET_NAME} ${KVM_COMMON_SOURCES})
 
     target_include_directories(${TARGET_NAME} PRIVATE ${KVM_COMMON_INCLUDES})
 
     target_compile_definitions(${TARGET_NAME} PRIVATE
-        BOARD_ROLE=${BOARD_ROLE}
-        PICO_BOARD_ROLE=${BOARD_ROLE}
         PIO_USB_USE_TINYUSB=1
         PIO_USB_DP_PIN_DEFAULT=${PIO_USB_DP_PIN_DEFAULT}
     )
@@ -120,9 +119,24 @@ function(kvm_add_firmware TARGET_NAME BOARD_ROLE)
     )
 endfunction()
 
-kvm_add_firmware(deskhop-a 0)
-kvm_add_firmware(deskhop-b 1)
+function(kvm_add_forced_firmware TARGET_NAME FORCE_ROLE)
+    kvm_add_firmware(${TARGET_NAME})
+    target_compile_definitions(${TARGET_NAME} PRIVATE
+        FORCE_BOARD_ROLE=${FORCE_ROLE}
+    )
+endfunction()
 
-message(STATUS "KVM role targets: deskhop-a (ROLE_A), deskhop-b (ROLE_B)")
+kvm_add_firmware(deskhop)
+
+if(KVM_BUILD_FORCED_TARGETS)
+    kvm_add_forced_firmware(deskhop-force-a 0)
+    kvm_add_forced_firmware(deskhop-force-b 1)
+endif()
+
+message(STATUS "KVM release target: deskhop.uf2 (runtime role probe)")
+if(KVM_BUILD_FORCED_TARGETS)
+    message(STATUS "KVM diagnostic targets: deskhop-force-a, deskhop-force-b")
+endif()
 message(STATUS "KVM_DEBUG=${KVM_DEBUG}")
+message(STATUS "KVM_BUILD_FORCED_TARGETS=${KVM_BUILD_FORCED_TARGETS}")
 message(STATUS "PICO_SDK_PATH=${PICO_SDK_PATH}")
