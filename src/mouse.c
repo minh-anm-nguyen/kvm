@@ -5,6 +5,7 @@
 #include "tusb.h"
 
 #include "config.h"
+#include "router.h"
 #include "uart.h"
 #include "usb_device.h"
 
@@ -73,17 +74,50 @@ void mouse_pointer_advance(int32_t *pointer_x,
                            int8_t dx,
                            int8_t dy) {
     if (pointer_x == NULL || pointer_y == NULL) {
-        /* Both axes are required; avoid dereferencing an invalid pointer. */
         return;
     }
 
-    /* Scale each relative axis before adding it to its absolute coordinate. */
     int32_t next_x = *pointer_x + mouse_scale_delta(dx, POINTER_SCALE_X);
     int32_t next_y = *pointer_y + mouse_scale_delta(dy, POINTER_SCALE_Y);
 
-    /* Keep the canonical pointer within the range accepted by the HID report. */
     *pointer_x = mouse_clamp(next_x, POINTER_MIN, POINTER_MAX);
     *pointer_y = mouse_clamp(next_y, POINTER_MIN, POINTER_MAX);
+}
+
+bool mouse_should_switch_to_b(uint8_t active_output,
+                              int32_t next_x,
+                              uint8_t buttons,
+                              bool armed) {
+#if !ENABLE_EDGE_SWITCHING
+    (void)active_output;
+    (void)next_x;
+    (void)buttons;
+    (void)armed;
+    return false;
+#else
+    return active_output == OUTPUT_A &&
+           next_x > POINTER_MAX &&
+           buttons == 0 &&
+           armed;
+#endif
+}
+
+bool mouse_should_switch_to_a(uint8_t active_output,
+                              int32_t next_x,
+                              uint8_t buttons,
+                              bool armed) {
+#if !ENABLE_EDGE_SWITCHING
+    (void)active_output;
+    (void)next_x;
+    (void)buttons;
+    (void)armed;
+    return false;
+#else
+    return active_output == OUTPUT_B &&
+           next_x < POINTER_MIN &&
+           buttons == 0 &&
+           armed;
+#endif
 }
 
 /*
@@ -306,46 +340,70 @@ static void mouse_route_absolute(device_state_t *state, const mouse_abs_report_t
     }
 }
 
-/*
- * Convert one relative boot-mouse event into the absolute report consumed by
- * the routing layer.
- *
- * Input:
- *   state      valid shared device state.  Board B owns pointer_x/pointer_y.
- *   dx, dy     signed relative movement from the physical boot mouse.
- *   buttons    current button bitmap from that report.
- *   wheel      signed vertical-wheel delta from that report.
- *
- * Output:
- *   Updates board B's accumulated absolute pointer position and button state,
- *   then passes a mouse_abs_report_t to mouse_route_absolute().  That next
- *   step queues it for local USB or UART depending on active_output.
- *
- * Board A never performs this conversion: accepting movement there would give
- * the two boards independent pointer accumulators that could drift apart.
- */
+static void mouse_route_after_update(device_state_t *state, uint8_t buttons, int8_t wheel) {
+    mouse_abs_report_t report;
+    mouse_build_report(state, buttons, wheel, &report);
+    mouse_route_absolute(state, &report);
+}
+
+static void mouse_edge_switch(device_state_t *state,
+                              uint8_t new_output,
+                              int32_t entry_x,
+                              uint8_t buttons,
+                              int8_t wheel) {
+    if (state->active_output == OUTPUT_A) {
+        state->pointer_x = POINTER_MAX;
+    } else {
+        state->pointer_x = POINTER_MIN;
+    }
+
+    router_set_active_output(state, new_output, true);
+
+    state->pointer_x = entry_x;
+    mouse_route_after_update(state, buttons, wheel);
+}
+
 static void mouse_process_relative(device_state_t *state,
                                    int8_t dx,
                                    int8_t dy,
                                    uint8_t buttons,
                                    int8_t wheel) {
     if (state->board_role != ROLE_B) {
-        /* Only board B owns the physical mouse and pointer accumulator. */
         return;
     }
 
-    /* Scale dx/dy, add them to X/Y, then clamp within the absolute HID range. */
-    mouse_pointer_advance(&state->pointer_x, &state->pointer_y, dx, dy);
+    int32_t next_x = state->pointer_x + mouse_scale_delta(dx, POINTER_SCALE_X);
+    int32_t next_y = state->pointer_y + mouse_scale_delta(dy, POINTER_SCALE_Y);
 
-    /* Retain the latest button state for change detection and release handling. */
+    state->pointer_y = mouse_clamp(next_y, POINTER_MIN, POINTER_MAX);
     state->mouse_buttons = buttons;
 
-    mouse_abs_report_t report;
-    /* Build an 8-byte absolute report from the updated state and wheel delta. */
-    mouse_build_report(state, buttons, wheel, &report);
+    if (mouse_should_switch_to_b(state->active_output,
+                                 next_x,
+                                 buttons,
+                                 state->edge_switch_armed)) {
+        mouse_edge_switch(state,
+                          OUTPUT_B,
+                          POINTER_MIN + POINTER_ENTRY_GAP,
+                          buttons,
+                          wheel);
+        return;
+    }
 
-    /* Route it to PC B locally or to PC A through UART. */
-    mouse_route_absolute(state, &report);
+    if (mouse_should_switch_to_a(state->active_output,
+                                 next_x,
+                                 buttons,
+                                 state->edge_switch_armed)) {
+        mouse_edge_switch(state,
+                          OUTPUT_A,
+                          POINTER_MAX - POINTER_ENTRY_GAP,
+                          buttons,
+                          wheel);
+        return;
+    }
+
+    state->pointer_x = mouse_clamp(next_x, POINTER_MIN, POINTER_MAX);
+    mouse_route_after_update(state, buttons, wheel);
 }
 
 /*
@@ -492,6 +550,54 @@ bool mouse_pointer_selftest(void) {
         if (y != POINTER_CENTER - POINTER_SCALE_Y) {
             return false;
         }
+    }
+
+    return true;
+}
+
+bool mouse_edge_selftest(void) {
+    const int32_t past_max = POINTER_MAX + 1;
+    const int32_t past_min = POINTER_MIN - 1;
+
+    if (!mouse_should_switch_to_b(OUTPUT_A, past_max, 0, true)) {
+        return false;
+    }
+    if (mouse_should_switch_to_b(OUTPUT_A, past_min, 0, true)) {
+        return false;
+    }
+    if (!mouse_should_switch_to_a(OUTPUT_B, past_min, 0, true)) {
+        return false;
+    }
+    if (mouse_should_switch_to_a(OUTPUT_B, past_max, 0, true)) {
+        return false;
+    }
+
+    if (mouse_should_switch_to_b(OUTPUT_A, past_max, 0x01, true)) {
+        return false;
+    }
+    if (mouse_should_switch_to_a(OUTPUT_B, past_min, 0x01, true)) {
+        return false;
+    }
+
+    if (mouse_should_switch_to_b(OUTPUT_A, past_max, 0, false)) {
+        return false;
+    }
+    if (mouse_should_switch_to_a(OUTPUT_B, past_min, 0, false)) {
+        return false;
+    }
+
+    if (mouse_should_switch_to_b(OUTPUT_B, past_max, 0, true)) {
+        return false;
+    }
+    if (mouse_should_switch_to_a(OUTPUT_A, past_min, 0, true)) {
+        return false;
+    }
+
+    if (mouse_clamp(past_min, POINTER_MIN, POINTER_MAX) != POINTER_MIN) {
+        return false;
+    }
+    if (mouse_clamp(past_max, POINTER_MIN, POINTER_MAX) != POINTER_MAX) {
+        return false;
     }
 
     return true;

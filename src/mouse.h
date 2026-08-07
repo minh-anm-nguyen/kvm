@@ -29,6 +29,15 @@ void mouse_pointer_advance(int32_t *pointer_x,
                            int8_t dx,
                            int8_t dy);
 
+bool mouse_should_switch_to_b(uint8_t active_output,
+                              int32_t next_x,
+                              uint8_t buttons,
+                              bool armed);
+bool mouse_should_switch_to_a(uint8_t active_output,
+                              int32_t next_x,
+                              uint8_t buttons,
+                              bool armed);
+
 void mouse_init(void);
 void mouse_on_report(const uint8_t *raw, uint16_t len);
 void mouse_on_unmount(void);
@@ -40,3 +49,4 @@ void mouse_build_report(const device_state_t *state,
                         int8_t wheel,
                         mouse_abs_report_t *out);
 bool mouse_pointer_selftest(void);
+bool mouse_edge_selftest(void);

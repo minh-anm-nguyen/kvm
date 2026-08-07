@@ -17,7 +17,7 @@ int main(void) {
     mouse_init();
 
 #ifdef KVM_DEBUG
-    if (!mouse_pointer_selftest() || !protocol_selftest()) {
+    if (!mouse_pointer_selftest() || !mouse_edge_selftest() || !protocol_selftest()) {
         while (true) {
             tight_loop_contents();
         }
