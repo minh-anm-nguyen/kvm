@@ -31,6 +31,7 @@ unsigned board_probe_last_attempts(void);
 #endif
 
 void board_init(device_state_t *state);
+void board_boot_resolve_role(device_state_t *state);
 void board_enable_watchdog(void);
 void board_update_led(device_state_t *state);
 void board_kick_watchdog(void);

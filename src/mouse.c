@@ -598,6 +598,10 @@ void mouse_on_report(const uint8_t *raw, uint16_t len) {
     mouse_rel_report_t report;
     /* Temporary decoded boot-mouse data: buttons, relative X/Y, and wheel. */
 
+    if (!g_state.routing_enabled) {
+        return;
+    }
+
     if (!parse_boot_mouse(raw, len, &report)) {
         /* Reject NULL or undersized raw HID reports before reading their fields. */
         return;
@@ -615,6 +619,9 @@ void mouse_on_report(const uint8_t *raw, uint16_t len) {
 
 void mouse_on_unmount(void) {
     g_state.mouse_buttons = 0;
+    if (!g_state.routing_enabled) {
+        return;
+    }
     mouse_process_relative(&g_state, 0, 0, 0, 0);
 }
 

@@ -13,8 +13,6 @@ device_state_t g_state;
 
 int main(void) {
     board_init(&g_state);
-    keyboard_init();
-    mouse_init();
 
 #ifdef KVM_DEBUG
     if (!board_pinmap_selftest() ||
@@ -29,9 +27,23 @@ int main(void) {
     }
 #endif
 
-    usb_host_init();
+    board_boot_resolve_role(&g_state);
+
+    const board_pinmap_t *pins = board_get_pinmap(g_state.board_role);
+    if (pins == NULL) {
+        while (true) {
+            tight_loop_contents();
+        }
+    }
+
+    keyboard_init();
+    mouse_init();
+
     usb_device_init();
-    uart_link_init(board_get_pinmap(g_state.board_role));
+    usb_host_init();
+    uart_link_init(pins);
+
+    g_state.routing_enabled = true;
 
     board_enable_watchdog();
 

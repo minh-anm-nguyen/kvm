@@ -224,6 +224,10 @@ void keyboard_on_report(const uint8_t *raw, uint16_t len) {
     hid_keyboard_report_t report;
     /* Temporary decoded modifier and keycode state from the HID input bytes. */
 
+    if (!g_state.routing_enabled) {
+        return;
+    }
+
     if (!parse_boot_keyboard(raw, len, &report)) {
         /* Reject malformed or undersized raw HID reports. */
         return;
@@ -275,6 +279,9 @@ void keyboard_on_unmount(void) {
     g_state.local_keyboard = empty;
     s_hotkey_held = false;
     s_suppress_until_empty = false;
+    if (!g_state.routing_enabled) {
+        return;
+    }
     keyboard_route(&g_state, &empty);
 }
 

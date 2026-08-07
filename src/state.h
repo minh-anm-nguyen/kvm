@@ -13,6 +13,7 @@ typedef struct {
     bool    usb_device_ready;
     bool    input_connected;
     bool    mouse_connected;
+    bool    routing_enabled;
 
     uint8_t  kbd_dev_addr;
     uint8_t  kbd_instance;

@@ -30,7 +30,7 @@ void tuh_hid_mount_cb(uint8_t dev_addr, uint8_t instance, uint8_t const *desc_re
 
     uint8_t itf_protocol = tuh_hid_interface_protocol(dev_addr, instance);
 
-    if (BOARD_ROLE == ROLE_A && itf_protocol == HID_ITF_PROTOCOL_KEYBOARD) {
+    if (g_state.board_role == ROLE_A && itf_protocol == HID_ITF_PROTOCOL_KEYBOARD) {
         tuh_hid_set_protocol(dev_addr, instance, HID_PROTOCOL_BOOT);
         g_state.kbd_dev_addr = dev_addr;
         g_state.kbd_instance = instance;
@@ -39,7 +39,7 @@ void tuh_hid_mount_cb(uint8_t dev_addr, uint8_t instance, uint8_t const *desc_re
         return;
     }
 
-    if (BOARD_ROLE == ROLE_B && itf_protocol == HID_ITF_PROTOCOL_MOUSE) {
+    if (g_state.board_role == ROLE_B && itf_protocol == HID_ITF_PROTOCOL_MOUSE) {
         tuh_hid_set_protocol(dev_addr, instance, HID_PROTOCOL_BOOT);
         g_state.mouse_dev_addr = dev_addr;
         g_state.mouse_instance = instance;
@@ -49,7 +49,7 @@ void tuh_hid_mount_cb(uint8_t dev_addr, uint8_t instance, uint8_t const *desc_re
 }
 
 void tuh_hid_umount_cb(uint8_t dev_addr, uint8_t instance) {
-    if (BOARD_ROLE == ROLE_A &&
+    if (g_state.board_role == ROLE_A &&
         dev_addr == g_state.kbd_dev_addr &&
         instance == g_state.kbd_instance) {
         keyboard_on_unmount();
@@ -59,7 +59,7 @@ void tuh_hid_umount_cb(uint8_t dev_addr, uint8_t instance) {
         return;
     }
 
-    if (BOARD_ROLE == ROLE_B &&
+    if (g_state.board_role == ROLE_B &&
         dev_addr == g_state.mouse_dev_addr &&
         instance == g_state.mouse_instance) {
         mouse_on_unmount();
@@ -70,7 +70,7 @@ void tuh_hid_umount_cb(uint8_t dev_addr, uint8_t instance) {
 }
 
 void tuh_hid_report_received_cb(uint8_t dev_addr, uint8_t instance, uint8_t const *report, uint16_t len) {
-    if (BOARD_ROLE == ROLE_A &&
+    if (g_state.board_role == ROLE_A &&
         dev_addr == g_state.kbd_dev_addr &&
         instance == g_state.kbd_instance) {
         if (tuh_hid_interface_protocol(dev_addr, instance) == HID_ITF_PROTOCOL_KEYBOARD) {
@@ -80,7 +80,7 @@ void tuh_hid_report_received_cb(uint8_t dev_addr, uint8_t instance, uint8_t cons
         return;
     }
 
-    if (BOARD_ROLE == ROLE_B &&
+    if (g_state.board_role == ROLE_B &&
         dev_addr == g_state.mouse_dev_addr &&
         instance == g_state.mouse_instance) {
         if (tuh_hid_interface_protocol(dev_addr, instance) == HID_ITF_PROTOCOL_MOUSE) {

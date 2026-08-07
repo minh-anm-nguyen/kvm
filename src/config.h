@@ -71,6 +71,16 @@ typedef enum {
 #define ROLE_PROBE_MAX_ATTEMPTS    8
 #define ROLE_PROBE_RETRY_MS        10
 
+/* Boot ordering */
+#define BOOT_SETTLE_MS 50
+
+/* LED boot timings (blocking, pre-mainloop) */
+#define LED_PROBE_BLINK_MS        50
+#define LED_ROLE_READY_ON_MS     200
+#define LED_ROLE_READY_GAP_MS    100
+#define LED_PROBE_ERROR_LONG_MS  400
+#define LED_PROBE_ERROR_SHORT_MS 100
+
 /* Protocol */
 #define PACKET_PREAMBLE_0 0xAA
 #define PACKET_PREAMBLE_1 0x55

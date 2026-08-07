@@ -283,6 +283,10 @@ void router_on_select_output(device_state_t *state, const uint8_t payload[8]) {
     uint8_t new_output = payload[0];
     /* Read the output peer selected: OUTPUT_A or OUTPUT_B. */
 
+    if (!state->routing_enabled) {
+        return;
+    }
+
     uint32_t gen = unpack_gen(payload);
     /* Decode the selection decision's little-endian generation. */
 
@@ -346,6 +350,10 @@ void router_on_remote_keyboard(device_state_t *state, const uint8_t payload[8]) 
     hid_keyboard_report_t report;
     /* Local representation of the fixed-size keyboard payload. */
 
+    if (!state->routing_enabled) {
+        return;
+    }
+
     memcpy(&report, payload, sizeof(report));
     /* Copy the payload bytes into the HID keyboard-report layout. */
 
@@ -380,6 +388,10 @@ void router_on_remote_keyboard(device_state_t *state, const uint8_t payload[8]) 
 void router_on_remote_mouse(device_state_t *state, const uint8_t payload[8]) {
     mouse_abs_report_t report;
     /* Decoded absolute mouse report, populated only after protocol validation. */
+
+    if (!state->routing_enabled) {
+        return;
+    }
 
     if (!protocol_unpack_mouse(payload, &report)) {
         /* Reject bad reserved bytes or coordinates outside the absolute range. */

@@ -417,12 +417,13 @@ bool board_detect_selftest(void) {
 }
 
 void board_init(device_state_t *state) {
-    state->board_role       = (board_role_t)BOARD_ROLE;
+    state->board_role       = BOARD_ROLE_UNKNOWN;
     state->active_output    = DEFAULT_ACTIVE_OUTPUT;
     state->peer_online      = false;
     state->usb_device_ready = false;
     state->input_connected  = false;
     state->mouse_connected  = false;
+    state->routing_enabled  = false;
     state->kbd_dev_addr     = 0;
     state->kbd_instance     = 0;
     state->mouse_dev_addr   = 0;
@@ -442,8 +443,74 @@ void board_init(device_state_t *state) {
 
     gpio_init(GPIO_LED_PIN);
     gpio_set_dir(GPIO_LED_PIN, GPIO_OUT);
-    gpio_put(GPIO_LED_PIN, state->active_output == OUTPUT_B ? 1 : 0);
-    state->led_on = (state->active_output == OUTPUT_B);
+    gpio_put(GPIO_LED_PIN, 0);
+
+    sleep_ms(BOOT_SETTLE_MS);
+}
+
+static void board_led_set(device_state_t *state, bool on) {
+    state->led_on = on;
+    gpio_put(GPIO_LED_PIN, on ? 1 : 0);
+}
+
+static void board_led_probe_blink(device_state_t *state) {
+    for (int i = 0; i < 4; i++) {
+        board_led_set(state, true);
+        sleep_ms(LED_PROBE_BLINK_MS);
+        board_led_set(state, false);
+        sleep_ms(LED_PROBE_BLINK_MS);
+    }
+}
+
+static void board_led_role_ready(device_state_t *state, board_role_t role) {
+    board_led_set(state, false);
+    sleep_ms(LED_ROLE_READY_GAP_MS);
+
+    if (role == BOARD_ROLE_A) {
+        board_led_set(state, true);
+        sleep_ms(LED_ROLE_READY_ON_MS);
+        board_led_set(state, false);
+        return;
+    }
+
+    /* Board B: two short blinks */
+    board_led_set(state, true);
+    sleep_ms(LED_ROLE_READY_ON_MS / 2);
+    board_led_set(state, false);
+    sleep_ms(LED_ROLE_READY_GAP_MS);
+    board_led_set(state, true);
+    sleep_ms(LED_ROLE_READY_ON_MS / 2);
+    board_led_set(state, false);
+}
+
+static void board_led_probe_error_loop(device_state_t *state) {
+    while (true) {
+        board_led_set(state, true);
+        sleep_ms(LED_PROBE_ERROR_LONG_MS);
+        board_led_set(state, false);
+        sleep_ms(LED_PROBE_ERROR_SHORT_MS);
+        board_led_set(state, true);
+        sleep_ms(LED_PROBE_ERROR_SHORT_MS);
+        board_led_set(state, false);
+        sleep_ms(LED_PROBE_ERROR_LONG_MS);
+    }
+}
+
+void board_boot_resolve_role(device_state_t *state) {
+    board_led_probe_blink(state);
+
+    board_role_t role = board_detect_role();
+
+    if (!board_role_is_concrete(role)) {
+        role = (board_role_t)BOARD_ROLE;
+    }
+
+    if (!board_role_is_concrete(role)) {
+        board_led_probe_error_loop(state);
+    }
+
+    state->board_role = role;
+    board_led_role_ready(state, role);
 }
 
 void board_enable_watchdog(void) {
