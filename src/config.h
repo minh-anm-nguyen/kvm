@@ -64,9 +64,12 @@ typedef enum {
 /* Hardware watchdog */
 #define WATCHDOG_TIMEOUT_MS 3000
 
-/* Role probe (single round) — multi-round limits come later */
-#define ROLE_PROBE_SETTLE_US  3000
-#define ROLE_A_MIN_MISMATCHES 4
+/* Role probe — one round + multi-round confidence */
+#define ROLE_PROBE_SETTLE_US       3000
+#define ROLE_A_MIN_MISMATCHES      4
+#define ROLE_PROBE_REQUIRED_ROUNDS 3
+#define ROLE_PROBE_MAX_ATTEMPTS    8
+#define ROLE_PROBE_RETRY_MS        10
 
 /* Protocol */
 #define PACKET_PREAMBLE_0 0xAA

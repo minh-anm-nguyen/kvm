@@ -209,6 +209,104 @@ role_probe_result_t board_probe_role_once(void) {
     return board_probe_classify(mismatches, (unsigned)PROBE_PATTERN_LEN);
 }
 
+#ifdef KVM_DEBUG
+static unsigned s_probe_last_attempts;
+#endif
+
+/*
+ * Decide board role from an ordered sequence of probe-round observations.
+ *
+ * Purpose:
+ *   Apply streak confidence without GPIO: three consecutive A or B observations
+ *   become a concrete role; ambiguous rounds reset both streaks; exhaustion of
+ *   ROLE_PROBE_MAX_ATTEMPTS yields UNKNOWN.  Shared by board_detect_role() and
+ *   pure multi-round selftests.
+ *
+ * Input:
+ *   results       sequence of per-round classifications (may be shorter than max).
+ *   count         number of valid entries in results.
+ *   attempts_out  optional; receives how many entries were consumed before return.
+ *
+ * Output:
+ *   BOARD_ROLE_A/B when REQUIRED consecutive rounds agree, else UNKNOWN.
+ *   Never returns CONFLICT.
+ */
+static board_role_t board_detect_from_results(const role_probe_result_t *results,
+                                              size_t count,
+                                              unsigned *attempts_out) {
+    unsigned a_streak = 0;
+    unsigned b_streak = 0;
+    size_t limit = count;
+
+    if (limit > ROLE_PROBE_MAX_ATTEMPTS) {
+        limit = ROLE_PROBE_MAX_ATTEMPTS;
+    }
+
+    for (size_t i = 0; i < limit; i++) {
+        if (results[i] == PROBE_ROLE_A) {
+            a_streak++;
+            b_streak = 0;
+        } else if (results[i] == PROBE_ROLE_B) {
+            b_streak++;
+            a_streak = 0;
+        } else {
+            a_streak = 0;
+            b_streak = 0;
+        }
+
+        if (a_streak >= ROLE_PROBE_REQUIRED_ROUNDS) {
+            if (attempts_out != NULL) {
+                *attempts_out = (unsigned)(i + 1);
+            }
+            return BOARD_ROLE_A;
+        }
+
+        if (b_streak >= ROLE_PROBE_REQUIRED_ROUNDS) {
+            if (attempts_out != NULL) {
+                *attempts_out = (unsigned)(i + 1);
+            }
+            return BOARD_ROLE_B;
+        }
+    }
+
+    if (attempts_out != NULL) {
+        *attempts_out = (unsigned)limit;
+    }
+    return BOARD_ROLE_UNKNOWN;
+}
+
+board_role_t board_detect_role(void) {
+    role_probe_result_t buf[ROLE_PROBE_MAX_ATTEMPTS];
+    unsigned attempts = 0;
+    board_role_t role = BOARD_ROLE_UNKNOWN;
+
+    for (unsigned n = 0; n < ROLE_PROBE_MAX_ATTEMPTS; n++) {
+        buf[n] = board_probe_role_once();
+        role = board_detect_from_results(buf, n + 1u, &attempts);
+        if (board_role_is_concrete(role)) {
+#ifdef KVM_DEBUG
+            s_probe_last_attempts = attempts;
+#endif
+            return role;
+        }
+
+        if (n + 1u < ROLE_PROBE_MAX_ATTEMPTS) {
+            sleep_ms(ROLE_PROBE_RETRY_MS);
+        }
+    }
+
+#ifdef KVM_DEBUG
+    s_probe_last_attempts = attempts;
+#endif
+    return BOARD_ROLE_UNKNOWN;
+}
+
+#ifdef KVM_DEBUG
+unsigned board_probe_last_attempts(void) {
+    return s_probe_last_attempts;
+}
+#endif
+
 bool board_probe_selftest(void) {
     unsigned ones = 0;
     unsigned zeros = 0;
@@ -243,6 +341,76 @@ bool board_probe_selftest(void) {
     if (board_probe_classify(8, (unsigned)PROBE_PATTERN_LEN) != PROBE_ROLE_A ||
         board_probe_classify(16, (unsigned)PROBE_PATTERN_LEN) != PROBE_ROLE_A) {
         return false;
+    }
+
+    return true;
+}
+
+bool board_detect_selftest(void) {
+    unsigned attempts = 0;
+
+    {
+        const role_probe_result_t seq[] = {
+            PROBE_ROLE_A, PROBE_ROLE_A, PROBE_ROLE_A,
+        };
+        if (board_detect_from_results(seq, 3, &attempts) != BOARD_ROLE_A ||
+            attempts != 3) {
+            return false;
+        }
+    }
+
+    {
+        const role_probe_result_t seq[] = {
+            PROBE_ROLE_B, PROBE_ROLE_B, PROBE_ROLE_B,
+        };
+        if (board_detect_from_results(seq, 3, &attempts) != BOARD_ROLE_B ||
+            attempts != 3) {
+            return false;
+        }
+    }
+
+    {
+        const role_probe_result_t seq[] = {
+            PROBE_ROLE_A, PROBE_AMBIGUOUS,
+            PROBE_ROLE_A, PROBE_ROLE_A, PROBE_ROLE_A,
+        };
+        if (board_detect_from_results(seq, 5, &attempts) != BOARD_ROLE_A ||
+            attempts != 5) {
+            return false;
+        }
+    }
+
+    {
+        const role_probe_result_t seq[] = {
+            PROBE_ROLE_B, PROBE_AMBIGUOUS,
+            PROBE_ROLE_B, PROBE_ROLE_B, PROBE_ROLE_B,
+        };
+        if (board_detect_from_results(seq, 5, &attempts) != BOARD_ROLE_B ||
+            attempts != 5) {
+            return false;
+        }
+    }
+
+    {
+        const role_probe_result_t seq[] = {
+            PROBE_ROLE_A, PROBE_ROLE_B, PROBE_ROLE_A, PROBE_ROLE_B,
+            PROBE_ROLE_A, PROBE_ROLE_B, PROBE_ROLE_A, PROBE_ROLE_B,
+        };
+        if (board_detect_from_results(seq, 8, &attempts) != BOARD_ROLE_UNKNOWN ||
+            attempts != ROLE_PROBE_MAX_ATTEMPTS) {
+            return false;
+        }
+    }
+
+    {
+        const role_probe_result_t seq[] = {
+            PROBE_AMBIGUOUS, PROBE_AMBIGUOUS, PROBE_AMBIGUOUS, PROBE_AMBIGUOUS,
+            PROBE_AMBIGUOUS, PROBE_AMBIGUOUS, PROBE_AMBIGUOUS, PROBE_AMBIGUOUS,
+        };
+        if (board_detect_from_results(seq, 8, &attempts) != BOARD_ROLE_UNKNOWN ||
+            attempts != ROLE_PROBE_MAX_ATTEMPTS) {
+            return false;
+        }
     }
 
     return true;

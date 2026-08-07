@@ -19,6 +19,7 @@ int main(void) {
 #ifdef KVM_DEBUG
     if (!board_pinmap_selftest() ||
         !board_probe_selftest() ||
+        !board_detect_selftest() ||
         !mouse_pointer_selftest() ||
         !mouse_edge_selftest() ||
         !protocol_selftest()) {

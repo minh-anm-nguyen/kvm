@@ -24,6 +24,12 @@ bool board_pinmap_selftest(void);
 role_probe_result_t board_probe_role_once(void);
 bool board_probe_selftest(void);
 
+board_role_t board_detect_role(void);
+bool board_detect_selftest(void);
+#ifdef KVM_DEBUG
+unsigned board_probe_last_attempts(void);
+#endif
+
 void board_init(device_state_t *state);
 void board_enable_watchdog(void);
 void board_update_led(device_state_t *state);
