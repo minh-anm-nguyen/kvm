@@ -244,7 +244,7 @@ void keyboard_on_report(const uint8_t *raw, uint16_t len) {
             uint8_t next = (uint8_t)(g_state.active_output ^ 1u);
             /* XOR 1 toggles the two valid outputs: A <-> B. */
 
-            router_set_active_output(&g_state, next, true);
+            router_set_active_output(&g_state, next, true, SWITCH_REASON_HOTKEY);
             /* Release the old output, select next, increment generation, notify peer. */
         }
 

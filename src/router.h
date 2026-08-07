@@ -6,13 +6,20 @@
 #include "state.h"
 
 typedef enum {
-    SWITCH_REASON_HOTKEY = 0,
+    SWITCH_REASON_NONE = 0,
+    SWITCH_REASON_HOTKEY,
     SWITCH_REASON_EDGE,
 } switch_reason_t;
 
 void router_release_output(device_state_t *state, uint8_t output);
-void router_commit_output(device_state_t *state, uint8_t new_output, bool notify_peer);
-void router_set_active_output(device_state_t *state, uint8_t new_output, bool notify_peer);
+void router_commit_output(device_state_t *state,
+                          uint8_t new_output,
+                          bool notify_peer,
+                          switch_reason_t reason);
+void router_set_active_output(device_state_t *state,
+                              uint8_t new_output,
+                              bool notify_peer,
+                              switch_reason_t reason);
 void router_on_select_output(device_state_t *state, const uint8_t payload[8]);
 void router_on_remote_keyboard(device_state_t *state, const uint8_t payload[8]);
 void router_on_remote_mouse(device_state_t *state, const uint8_t payload[8]);

@@ -26,9 +26,12 @@ bool router_is_local_active(const device_state_t *state) {
  *   gen      version of that output-selection decision.
  *
  * Output layout:
- *   [0] output, [1..4] generation (little-endian), [5..7] reserved zero.
+ *   [0] output, [1..4] generation (little-endian), [5] switch reason, [6..7] zero.
  */
-static void pack_select_payload(uint8_t payload[PACKET_PAYLOAD_LEN], uint8_t output, uint32_t gen) {
+static void pack_select_payload(uint8_t payload[PACKET_PAYLOAD_LEN],
+                                uint8_t output,
+                                uint32_t gen,
+                                uint8_t reason) {
     memset(payload, 0, PACKET_PAYLOAD_LEN);
     /* Initialize reserved bytes to zero before writing the meaningful fields. */
 
@@ -46,6 +49,8 @@ static void pack_select_payload(uint8_t payload[PACKET_PAYLOAD_LEN], uint8_t out
 
     payload[4] = (uint8_t)((gen >> 24) & 0xFF);
     /* Generation byte 3: most-significant byte, completing little-endian. */
+
+    payload[5] = reason;
 }
 
 static uint32_t unpack_gen(const uint8_t payload[PACKET_PAYLOAD_LEN]) {
@@ -53,6 +58,15 @@ static uint32_t unpack_gen(const uint8_t payload[PACKET_PAYLOAD_LEN]) {
            ((uint32_t)payload[2] << 8) |
            ((uint32_t)payload[3] << 16) |
            ((uint32_t)payload[4] << 24);
+}
+
+static void broadcast_select(device_state_t *state, switch_reason_t reason) {
+    uint8_t payload[PACKET_PAYLOAD_LEN];
+    pack_select_payload(payload,
+                        state->active_output,
+                        state->output_generation,
+                        (uint8_t)reason);
+    uart_queue_packet(MSG_SELECT_OUTPUT, payload);
 }
 
 /*
@@ -73,14 +87,7 @@ static uint32_t unpack_gen(const uint8_t payload[PACKET_PAYLOAD_LEN]) {
  *   caller must make that decision before broadcasting it.
  */
 void router_broadcast_active_output(device_state_t *state) {
-    uint8_t payload[PACKET_PAYLOAD_LEN];
-    /* Stack buffer for the eight-byte MSG_SELECT_OUTPUT payload. */
-
-    pack_select_payload(payload, state->active_output, state->output_generation);
-    /* Serialize the current output choice and generation into the payload. */
-
-    uart_queue_packet(MSG_SELECT_OUTPUT, payload);
-    /* Add UART framing/checksum and enqueue the packet for the peer. */
+    broadcast_select(state, SWITCH_REASON_NONE);
 }
 
 /*
@@ -134,7 +141,10 @@ void router_release_output(device_state_t *state, uint8_t output) {
  *
  * Does not release input.  Generation increments only when notify_peer is true.
  */
-void router_commit_output(device_state_t *state, uint8_t new_output, bool notify_peer) {
+void router_commit_output(device_state_t *state,
+                          uint8_t new_output,
+                          bool notify_peer,
+                          switch_reason_t reason) {
     if (new_output > OUTPUT_B) {
         return;
     }
@@ -143,7 +153,7 @@ void router_commit_output(device_state_t *state, uint8_t new_output, bool notify
 
     if (notify_peer) {
         state->output_generation++;
-        router_broadcast_active_output(state);
+        broadcast_select(state, reason);
     }
 }
 
@@ -159,13 +169,17 @@ void router_commit_output(device_state_t *state, uint8_t new_output, bool notify
  *   state        local shared device state.
  *   new_output   requested destination: OUTPUT_A or OUTPUT_B.
  *   notify_peer  true when this board owns the decision and must advertise it.
+ *   reason       carried in SELECT so the mouse owner can place the pointer.
  *
  * Output:
  *   Updates active_output after releasing the old output.  With notify_peer,
  *   increments output_generation and queues MSG_SELECT_OUTPUT for the peer.
  *   Passing false performs only the local state change and sends nothing.
  */
-void router_set_active_output(device_state_t *state, uint8_t new_output, bool notify_peer) {
+void router_set_active_output(device_state_t *state,
+                              uint8_t new_output,
+                              bool notify_peer,
+                              switch_reason_t reason) {
     if (new_output > OUTPUT_B) {
         /* Reject values outside the two valid outputs before touching state. */
         return;
@@ -177,14 +191,14 @@ void router_set_active_output(device_state_t *state, uint8_t new_output, bool no
     if (old != new_output) {
         /* A real switch is required: release reports must use the old route. */
         router_release_output(state, old);
-        router_commit_output(state, new_output, notify_peer);
+        router_commit_output(state, new_output, notify_peer, reason);
         return;
     }
 
     if (notify_peer) {
         /* Same output: still advance generation and rebroadcast when requested. */
         state->output_generation++;
-        router_broadcast_active_output(state);
+        broadcast_select(state, reason);
     }
 }
 
@@ -198,13 +212,14 @@ void router_set_active_output(device_state_t *state, uint8_t new_output, bool no
  *
  * Input:
  *   state    local shared device state to synchronize.
- *   payload  MSG_SELECT_OUTPUT body: [0] output, [1..4] generation in
- *            little-endian order, and reserved zero bytes thereafter.
+ *   payload  MSG_SELECT_OUTPUT body: [0] output, [1..4] generation LE,
+ *            [5] switch reason, and reserved zeros thereafter.
  *
  * Output:
  *   Rejects an invalid output or stale generation.  Otherwise releases local
  *   input if the old output belongs to this board, then updates active_output
- *   and output_generation.  It does not increment generation or reply to peer.
+ *   and output_generation.  On board B, a HOTKEY reason places the pointer
+ *   at center and arms edge switching.  It does not increment generation.
  */
 void router_on_select_output(device_state_t *state, const uint8_t payload[8]) {
     uint8_t new_output = payload[0];
@@ -212,6 +227,8 @@ void router_on_select_output(device_state_t *state, const uint8_t payload[8]) {
 
     uint32_t gen = unpack_gen(payload);
     /* Decode the selection decision's little-endian generation. */
+
+    uint8_t reason = payload[5];
 
     if (new_output > OUTPUT_B) {
         /* Reject malformed output values before modifying local state. */
@@ -242,6 +259,12 @@ void router_on_select_output(device_state_t *state, const uint8_t payload[8]) {
 
     state->output_generation = gen;
     /* Record the generation that authorized this state update. */
+
+    if (state->board_role == ROLE_B &&
+        old != new_output &&
+        reason == (uint8_t)SWITCH_REASON_HOTKEY) {
+        mouse_on_hotkey_switch(state);
+    }
 }
 
 /*
@@ -428,7 +451,7 @@ void router_on_peer_heartbeat(device_state_t *state, const uint8_t payload[8], b
         /* Peer has a newer decision, so local state must catch up to it. */
         uint8_t sel[PACKET_PAYLOAD_LEN];
 
-        pack_select_payload(sel, peer_output, peer_gen);
+        pack_select_payload(sel, peer_output, peer_gen, SWITCH_REASON_NONE);
         /* Adapt heartbeat fields to the existing select-output receiver format. */
 
         router_on_select_output(state, sel);
@@ -453,7 +476,7 @@ void router_on_peer_heartbeat(device_state_t *state, const uint8_t payload[8], b
             /* Board B yields to the peer's (board A) state. */
             uint8_t sel[PACKET_PAYLOAD_LEN];
 
-            pack_select_payload(sel, peer_output, peer_gen);
+            pack_select_payload(sel, peer_output, peer_gen, SWITCH_REASON_NONE);
 
             router_on_select_output(state, sel);
         } else {

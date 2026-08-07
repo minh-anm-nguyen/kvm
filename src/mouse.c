@@ -390,11 +390,21 @@ static void mouse_edge_switch(device_state_t *state,
     mouse_route_absolute(state, &final_r);
 
     router_release_output(state, old);
-    router_commit_output(state, new_output, true);
+    router_commit_output(state, new_output, true, SWITCH_REASON_EDGE);
 
     state->pointer_x = entry_x;
     state->edge_switch_armed = false;
 
+    mouse_route_after_update(state, 0, 0);
+}
+
+void mouse_on_hotkey_switch(device_state_t *state) {
+    if (state == NULL || state->board_role != ROLE_B) {
+        return;
+    }
+
+    state->pointer_x = POINTER_CENTER;
+    state->edge_switch_armed = true;
     mouse_route_after_update(state, 0, 0);
 }
 

@@ -48,5 +48,6 @@ void mouse_build_report(const device_state_t *state,
                         uint8_t buttons,
                         int8_t wheel,
                         mouse_abs_report_t *out);
+void mouse_on_hotkey_switch(device_state_t *state);
 bool mouse_pointer_selftest(void);
 bool mouse_edge_selftest(void);
