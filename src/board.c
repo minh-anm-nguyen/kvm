@@ -9,13 +9,75 @@
 
 #include "config.h"
 
+static const board_pinmap_t PINMAP_A = {
+    .uart_rx = BOARD_A_RX,
+    .uart_tx = BOARD_A_TX,
+    .usb_host_dp = BOARD_A_USB_DP,
+};
+
+static const board_pinmap_t PINMAP_B = {
+    .uart_rx = BOARD_B_RX,
+    .uart_tx = BOARD_B_TX,
+    .usb_host_dp = BOARD_B_USB_DP,
+};
+
 int dh_debug_printf(const char *format, ...) {
     (void)format;
     return 0;
 }
 
+bool board_role_is_concrete(board_role_t role) {
+    return role == BOARD_ROLE_A || role == BOARD_ROLE_B;
+}
+
+const board_pinmap_t *board_get_pinmap(board_role_t role) {
+    if (role == BOARD_ROLE_A) {
+        return &PINMAP_A;
+    }
+    if (role == BOARD_ROLE_B) {
+        return &PINMAP_B;
+    }
+    return NULL;
+}
+
+bool board_pinmap_selftest(void) {
+    const board_pinmap_t *map_a = board_get_pinmap(BOARD_ROLE_A);
+    const board_pinmap_t *map_b = board_get_pinmap(BOARD_ROLE_B);
+
+    if (!board_role_is_concrete(BOARD_ROLE_A) ||
+        !board_role_is_concrete(BOARD_ROLE_B)) {
+        return false;
+    }
+
+    if (board_role_is_concrete(BOARD_ROLE_UNKNOWN) ||
+        board_role_is_concrete(BOARD_ROLE_CONFLICT)) {
+        return false;
+    }
+
+    if (map_a == NULL ||
+        map_a->uart_rx != BOARD_A_RX ||
+        map_a->uart_tx != BOARD_A_TX ||
+        map_a->usb_host_dp != BOARD_A_USB_DP) {
+        return false;
+    }
+
+    if (map_b == NULL ||
+        map_b->uart_rx != BOARD_B_RX ||
+        map_b->uart_tx != BOARD_B_TX ||
+        map_b->usb_host_dp != BOARD_B_USB_DP) {
+        return false;
+    }
+
+    if (board_get_pinmap(BOARD_ROLE_UNKNOWN) != NULL ||
+        board_get_pinmap(BOARD_ROLE_CONFLICT) != NULL) {
+        return false;
+    }
+
+    return true;
+}
+
 void board_init(device_state_t *state) {
-    state->board_role       = (uint8_t)BOARD_ROLE;
+    state->board_role       = (board_role_t)BOARD_ROLE;
     state->active_output    = DEFAULT_ACTIVE_OUTPUT;
     state->peer_online      = false;
     state->usb_device_ready = false;

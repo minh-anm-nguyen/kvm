@@ -47,50 +47,28 @@ static bool queue_pop(packet_queue_t *q, uart_packet_t *pkt) {
 }
 
 /*
- * Select the physical UART TX/RX GPIO pair wired for one board role.
+ * Bring up the inter-board UART on pins resolved for a concrete board role.
  *
  * Purpose:
- *   Board A and board B use role-specific pin definitions, even though both
- *   execute the same firmware.  uart_link_init() needs this mapping before it
- *   assigns GPIO_FUNC_UART to the correct pins.
+ *   Assign GPIO function UART and configure the hard UART after callers have
+ *   obtained a pinmap via board_get_pinmap().  Non-concrete roles produce a
+ *   NULL pinmap and must not configure link pins.
  *
  * Input:
- *   board_role  ROLE_A selects BOARD_A_TX/RX; every other value selects the
- *               board-B pair, matching the firmware's two-role assumption.
- *   tx, rx      non-NULL destinations for the selected GPIO numbers.
- *
- * Output:
- *   Writes the chosen TX and RX pin numbers through *tx and *rx.  It performs
- *   no GPIO or UART hardware operation itself.
+ *   pins  immutable map with uart_tx/uart_rx, or NULL to skip init.
  */
-static void uart_pins_for_role(uint8_t board_role, uint *tx, uint *rx) {
-    if (board_role == ROLE_A) {
-        *tx = BOARD_A_TX;
-        /* Board A transmits on its configured cross-link TX GPIO. */
-
-        *rx = BOARD_A_RX;
-        /* Board A receives on its configured cross-link RX GPIO. */
-    } else {
-        *tx = BOARD_B_TX;
-        /* Board B uses its own TX GPIO in the same shared firmware image. */
-
-        *rx = BOARD_B_RX;
-        /* Board B uses its own RX GPIO. */
+void uart_link_init(const board_pinmap_t *pins) {
+    if (pins == NULL) {
+        return;
     }
-}
-
-void uart_link_init(uint8_t board_role) {
-    uint tx_pin;
-    uint rx_pin;
-    uart_pins_for_role(board_role, &tx_pin, &rx_pin);
 
     uart_init(SERIAL_UART, SERIAL_BAUDRATE);
     uart_set_hw_flow(SERIAL_UART, false, false);
     uart_set_format(SERIAL_UART, SERIAL_DATA_BITS, SERIAL_STOP_BITS, SERIAL_PARITY);
     uart_set_fifo_enabled(SERIAL_UART, true);
 
-    gpio_set_function(tx_pin, GPIO_FUNC_UART);
-    gpio_set_function(rx_pin, GPIO_FUNC_UART);
+    gpio_set_function(pins->uart_tx, GPIO_FUNC_UART);
+    gpio_set_function(pins->uart_rx, GPIO_FUNC_UART);
 
     memset(&s_tx_queue, 0, sizeof(s_tx_queue));
     protocol_parser_reset(&s_parser);

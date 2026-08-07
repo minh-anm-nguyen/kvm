@@ -17,7 +17,10 @@ int main(void) {
     mouse_init();
 
 #ifdef KVM_DEBUG
-    if (!mouse_pointer_selftest() || !mouse_edge_selftest() || !protocol_selftest()) {
+    if (!board_pinmap_selftest() ||
+        !mouse_pointer_selftest() ||
+        !mouse_edge_selftest() ||
+        !protocol_selftest()) {
         while (true) {
             tight_loop_contents();
         }
@@ -26,7 +29,7 @@ int main(void) {
 
     usb_host_init();
     usb_device_init();
-    uart_link_init(g_state.board_role);
+    uart_link_init(board_get_pinmap(g_state.board_role));
 
     board_enable_watchdog();
 

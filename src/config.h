@@ -4,11 +4,19 @@
 
 #include "class/hid/hid.h"
 
-/* ---- Board / output roles (compile-time for board_role) ---------------- */
+/* ---- Board / output roles ---------------------------------------------- */
 #ifndef BOARD_ROLE
 #error "BOARD_ROLE must be set by the build system (0=A, 1=B)"
 #endif
 
+typedef enum {
+    BOARD_ROLE_A        = 0,
+    BOARD_ROLE_B        = 1,
+    BOARD_ROLE_CONFLICT = 0xFE,
+    BOARD_ROLE_UNKNOWN  = 0xFF,
+} board_role_t;
+
+/* Numeric macros so compile-time #if BOARD_ROLE == ROLE_A still works. */
 #define ROLE_A 0
 #define ROLE_B 1
 
@@ -27,8 +35,10 @@
 #define BOARD_B_TX 16
 #define BOARD_B_RX 17
 
-/* PIO-USB host D+/D- (D- is next pin) */
+/* PIO-USB host D+/D- (D- is next pin); shared pin on both board positions */
 #define PIO_USB_DP_PIN 14
+#define BOARD_A_USB_DP PIO_USB_DP_PIN
+#define BOARD_B_USB_DP PIO_USB_DP_PIN
 
 #define SERIAL_UART_ID 0 /* uart0 */
 #define SERIAL_BAUDRATE 115200

@@ -7,7 +7,7 @@
 #include "config.h"
 
 typedef struct {
-    uint8_t board_role;
+    board_role_t board_role;
     uint8_t active_output;
     bool    peer_online;
     bool    usb_device_ready;

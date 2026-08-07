@@ -4,12 +4,13 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "board.h"
 #include "class/hid/hid.h"
 #include "mouse.h"
 #include "protocol.h"
 #include "state.h"
 
-void uart_link_init(uint8_t board_role);
+void uart_link_init(const board_pinmap_t *pins);
 void uart_link_task(device_state_t *state);
 
 void uart_write_bytes(const uint8_t *data, size_t len);
