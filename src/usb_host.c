@@ -6,6 +6,7 @@
 #include "pio_usb.h"
 #include "tusb.h"
 
+#include "board.h"
 #include "config.h"
 #include "keyboard.h"
 #include "mouse.h"
@@ -30,26 +31,34 @@ void tuh_hid_mount_cb(uint8_t dev_addr, uint8_t instance, uint8_t const *desc_re
 
     uint8_t itf_protocol = tuh_hid_interface_protocol(dev_addr, instance);
 
-    if (g_state.board_role == ROLE_A && itf_protocol == HID_ITF_PROTOCOL_KEYBOARD) {
-        tuh_hid_set_protocol(dev_addr, instance, HID_PROTOCOL_BOOT);
-        g_state.kbd_dev_addr = dev_addr;
-        g_state.kbd_instance = instance;
-        g_state.input_connected = true;
-        tuh_hid_receive_report(dev_addr, instance);
+    if (itf_protocol == HID_ITF_PROTOCOL_KEYBOARD) {
+        if (board_accepts_keyboard(g_state.board_role)) {
+            tuh_hid_set_protocol(dev_addr, instance, HID_PROTOCOL_BOOT);
+            g_state.kbd_dev_addr = dev_addr;
+            g_state.kbd_instance = instance;
+            g_state.input_connected = true;
+            tuh_hid_receive_report(dev_addr, instance);
+        } else if (board_role_is_concrete(g_state.board_role)) {
+            board_note_wrong_port_input();
+        }
         return;
     }
 
-    if (g_state.board_role == ROLE_B && itf_protocol == HID_ITF_PROTOCOL_MOUSE) {
-        tuh_hid_set_protocol(dev_addr, instance, HID_PROTOCOL_BOOT);
-        g_state.mouse_dev_addr = dev_addr;
-        g_state.mouse_instance = instance;
-        g_state.mouse_connected = true;
-        tuh_hid_receive_report(dev_addr, instance);
+    if (itf_protocol == HID_ITF_PROTOCOL_MOUSE) {
+        if (board_accepts_mouse(g_state.board_role)) {
+            tuh_hid_set_protocol(dev_addr, instance, HID_PROTOCOL_BOOT);
+            g_state.mouse_dev_addr = dev_addr;
+            g_state.mouse_instance = instance;
+            g_state.mouse_connected = true;
+            tuh_hid_receive_report(dev_addr, instance);
+        } else if (board_role_is_concrete(g_state.board_role)) {
+            board_note_wrong_port_input();
+        }
     }
 }
 
 void tuh_hid_umount_cb(uint8_t dev_addr, uint8_t instance) {
-    if (g_state.board_role == ROLE_A &&
+    if (board_accepts_keyboard(g_state.board_role) &&
         dev_addr == g_state.kbd_dev_addr &&
         instance == g_state.kbd_instance) {
         keyboard_on_unmount();
@@ -59,7 +68,7 @@ void tuh_hid_umount_cb(uint8_t dev_addr, uint8_t instance) {
         return;
     }
 
-    if (g_state.board_role == ROLE_B &&
+    if (board_accepts_mouse(g_state.board_role) &&
         dev_addr == g_state.mouse_dev_addr &&
         instance == g_state.mouse_instance) {
         mouse_on_unmount();
@@ -70,7 +79,7 @@ void tuh_hid_umount_cb(uint8_t dev_addr, uint8_t instance) {
 }
 
 void tuh_hid_report_received_cb(uint8_t dev_addr, uint8_t instance, uint8_t const *report, uint16_t len) {
-    if (g_state.board_role == ROLE_A &&
+    if (board_accepts_keyboard(g_state.board_role) &&
         dev_addr == g_state.kbd_dev_addr &&
         instance == g_state.kbd_instance) {
         if (tuh_hid_interface_protocol(dev_addr, instance) == HID_ITF_PROTOCOL_KEYBOARD) {
@@ -80,7 +89,7 @@ void tuh_hid_report_received_cb(uint8_t dev_addr, uint8_t instance, uint8_t cons
         return;
     }
 
-    if (g_state.board_role == ROLE_B &&
+    if (board_accepts_mouse(g_state.board_role) &&
         dev_addr == g_state.mouse_dev_addr &&
         instance == g_state.mouse_instance) {
         if (tuh_hid_interface_protocol(dev_addr, instance) == HID_ITF_PROTOCOL_MOUSE) {

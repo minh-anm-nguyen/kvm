@@ -31,6 +31,7 @@ typedef struct {
     uint8_t  peer_protocol_version;
     uint32_t last_peer_heartbeat_ms;
     uint32_t output_generation;
+    uint32_t wrong_port_led_until_ms;
 
     bool led_on;
 } device_state_t;

@@ -42,6 +42,14 @@ bool board_role_is_concrete(board_role_t role) {
     return role == BOARD_ROLE_A || role == BOARD_ROLE_B;
 }
 
+bool board_accepts_keyboard(board_role_t role) {
+    return role == BOARD_ROLE_A;
+}
+
+bool board_accepts_mouse(board_role_t role) {
+    return role == BOARD_ROLE_B;
+}
+
 const board_pinmap_t *board_get_pinmap(board_role_t role) {
     if (role == BOARD_ROLE_A) {
         return &PINMAP_A;
@@ -416,6 +424,24 @@ bool board_detect_selftest(void) {
     return true;
 }
 
+bool board_ownership_selftest(void) {
+    if (!board_accepts_keyboard(BOARD_ROLE_A) ||
+        board_accepts_keyboard(BOARD_ROLE_B) ||
+        board_accepts_keyboard(BOARD_ROLE_UNKNOWN) ||
+        board_accepts_keyboard(BOARD_ROLE_CONFLICT)) {
+        return false;
+    }
+
+    if (!board_accepts_mouse(BOARD_ROLE_B) ||
+        board_accepts_mouse(BOARD_ROLE_A) ||
+        board_accepts_mouse(BOARD_ROLE_UNKNOWN) ||
+        board_accepts_mouse(BOARD_ROLE_CONFLICT)) {
+        return false;
+    }
+
+    return true;
+}
+
 void board_init(device_state_t *state) {
     state->board_role       = BOARD_ROLE_UNKNOWN;
     state->active_output    = DEFAULT_ACTIVE_OUTPUT;
@@ -437,6 +463,7 @@ void board_init(device_state_t *state) {
     state->peer_protocol_version = 0;
     state->last_peer_heartbeat_ms = 0;
     state->output_generation = 0;
+    state->wrong_port_led_until_ms = 0;
     state->led_on = false;
     memset(&state->local_keyboard, 0, sizeof(state->local_keyboard));
     memset(&state->remote_keyboard, 0, sizeof(state->remote_keyboard));
@@ -517,6 +544,10 @@ void board_boot_resolve_role(device_state_t *state) {
     board_led_role_ready(state, role);
 }
 
+void board_note_wrong_port_input(void) {
+    g_state.wrong_port_led_until_ms = board_millis() + WRONG_PORT_LED_MS;
+}
+
 void board_enable_watchdog(void) {
 #ifdef KVM_DEBUG
     watchdog_enable(WATCHDOG_TIMEOUT_MS, true);
@@ -531,9 +562,13 @@ uint32_t board_millis(void) {
 
 void board_update_led(device_state_t *state) {
     bool on;
+    uint32_t now = board_millis();
 
-    if (state->protocol_mismatch) {
-        on = ((board_millis() / LED_PROTOCOL_MISMATCH_MS) & 1u) != 0;
+    if (state->wrong_port_led_until_ms != 0 &&
+        now < state->wrong_port_led_until_ms) {
+        on = ((now / LED_WRONG_PORT_BLINK_MS) & 1u) != 0;
+    } else if (state->protocol_mismatch) {
+        on = ((now / LED_PROTOCOL_MISMATCH_MS) & 1u) != 0;
     } else {
         on = (state->active_output == OUTPUT_B);
     }

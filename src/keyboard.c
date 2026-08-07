@@ -5,6 +5,7 @@
 #include "tusb.h"
 
 #include "config.h"
+#include "board.h"
 #include "router.h"
 #include "uart.h"
 #include "usb_device.h"
@@ -191,7 +192,7 @@ static bool parse_boot_keyboard(const uint8_t *raw, uint16_t len, hid_keyboard_r
 }
 
 static void keyboard_route(device_state_t *state, const hid_keyboard_report_t *report) {
-    if (state->board_role != ROLE_A) {
+    if (!board_accepts_keyboard(state->board_role)) {
         return;
     }
 

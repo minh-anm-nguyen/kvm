@@ -85,6 +85,10 @@ typedef enum {
 /* LED mismatch blink (protocol v1/v2) */
 #define LED_PROTOCOL_MISMATCH_MS 100
 
+/* Wrong local HID port (e.g. mouse on board A host) */
+#define WRONG_PORT_LED_MS        2000
+#define LED_WRONG_PORT_BLINK_MS   100
+
 /* USB device */
 #define USB_HID_POLL_MS 10
 

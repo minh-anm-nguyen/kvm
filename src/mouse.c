@@ -5,6 +5,7 @@
 #include "tusb.h"
 
 #include "config.h"
+#include "board.h"
 #include "router.h"
 #include "uart.h"
 #include "usb_device.h"
@@ -318,7 +319,7 @@ static bool parse_boot_mouse(const uint8_t *raw, uint16_t len, mouse_rel_report_
  * physical mouse and of the accumulated pointer coordinates.
  */
 static void mouse_route_absolute(device_state_t *state, const mouse_abs_report_t *report) {
-    if (state->board_role != ROLE_B) {
+    if (!board_accepts_mouse(state->board_role)) {
         /* Board A receives remote reports; it must not create a second route. */
         return;
     }
@@ -449,7 +450,7 @@ static void mouse_edge_switch(device_state_t *state,
  *   or change active_output itself; the router has already done that.
  */
 void mouse_on_hotkey_switch(device_state_t *state) {
-    if (state == NULL || state->board_role != ROLE_B) {
+    if (state == NULL || !board_accepts_mouse(state->board_role)) {
         /* Only board B owns pointer state; reject invalid or board-A calls. */
         return;
     }
@@ -533,7 +534,7 @@ static void mouse_process_relative(device_state_t *state,
                                    int8_t dy,
                                    uint8_t buttons,
                                    int8_t wheel) {
-    if (state->board_role != ROLE_B) {
+    if (!board_accepts_mouse(state->board_role)) {
         /* Only board B owns relative HID mouse input and pointer accumulation. */
         return;
     }
