@@ -454,6 +454,27 @@ void router_on_peer_offline(device_state_t *state) {
     }
 }
 
+void router_enter_role_conflict(device_state_t *state) {
+    hid_keyboard_report_t empty_kbd = {0};
+
+    if (state->board_role == BOARD_ROLE_CONFLICT) {
+        return;
+    }
+
+    state->board_role = BOARD_ROLE_CONFLICT;
+    state->routing_enabled = false;
+    state->peer_protocol_ok = false;
+    state->peer_role_validated = false;
+    state->protocol_mismatch = false;
+
+    memset(&state->local_keyboard, 0, sizeof(state->local_keyboard));
+    memset(&state->remote_keyboard, 0, sizeof(state->remote_keyboard));
+    keyboard_queue_local(&empty_kbd);
+
+    state->mouse_buttons = 0;
+    mouse_release_local();
+}
+
 /*
  * Process a peer heartbeat, verify protocol compatibility, and reconcile the
  * two boards' output-selection state.
@@ -495,6 +516,12 @@ void router_on_peer_heartbeat(device_state_t *state, const uint8_t payload[8], b
 
     state->protocol_mismatch = false;
 
+    if ((board_role_t)peer_role_raw == BOARD_ROLE_CONFLICT) {
+        state->peer_role = BOARD_ROLE_CONFLICT;
+        router_enter_role_conflict(state);
+        return;
+    }
+
     if (!board_role_is_concrete((board_role_t)peer_role_raw)) {
         state->peer_protocol_ok = false;
         state->peer_role_validated = false;
@@ -503,9 +530,14 @@ void router_on_peer_heartbeat(device_state_t *state, const uint8_t payload[8], b
 
     state->peer_role = (board_role_t)peer_role_raw;
 
-    if (!board_role_is_peer_of(state->board_role, state->peer_role)) {
+    if (state->board_role == BOARD_ROLE_CONFLICT) {
         state->peer_protocol_ok = false;
         state->peer_role_validated = false;
+        return;
+    }
+
+    if (!board_role_is_peer_of(state->board_role, state->peer_role)) {
+        router_enter_role_conflict(state);
         return;
     }
 

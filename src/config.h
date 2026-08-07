@@ -82,8 +82,12 @@ typedef enum {
 #define PACKET_SIZE       12
 #define DESKHOP_PROTOCOL_VERSION 3
 
-/* LED mismatch blink (protocol v1/v2) */
+/* LED mismatch blink (protocol version) */
 #define LED_PROTOCOL_MISMATCH_MS 100
+
+/* ROLE_CONFLICT: three short blinks then a pause (non-blocking) */
+#define LED_CONFLICT_BLINK_MS    80
+#define LED_CONFLICT_GAP_MS     400
 
 /* Wrong local HID port (e.g. mouse on board A host) */
 #define WRONG_PORT_LED_MS        2000

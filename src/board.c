@@ -579,8 +579,20 @@ void board_update_led(device_state_t *state) {
     bool on;
     uint32_t now = board_millis();
 
-    if (state->wrong_port_led_until_ms != 0 &&
-        now < state->wrong_port_led_until_ms) {
+    if (state->board_role == BOARD_ROLE_CONFLICT) {
+        /* Three pulses (on/off) then a quiet gap, repeating. */
+        const uint32_t pulse = LED_CONFLICT_BLINK_MS;
+        const uint32_t burston = pulse * 6u; /* 3 on + 3 off */
+        const uint32_t period = burston + LED_CONFLICT_GAP_MS;
+        uint32_t t = now % period;
+        if (t >= burston) {
+            on = false;
+        } else {
+            uint32_t slot = t / pulse;
+            on = ((slot & 1u) == 0u);
+        }
+    } else if (state->wrong_port_led_until_ms != 0 &&
+               now < state->wrong_port_led_until_ms) {
         on = ((now / LED_WRONG_PORT_BLINK_MS) & 1u) != 0;
     } else if (state->protocol_mismatch) {
         on = ((now / LED_PROTOCOL_MISMATCH_MS) & 1u) != 0;
