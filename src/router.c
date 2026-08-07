@@ -53,20 +53,59 @@ static void pack_select_payload(uint8_t payload[PACKET_PAYLOAD_LEN],
     payload[5] = reason;
 }
 
+/*
+ * Decode the little-endian generation stored in a MSG_SELECT_OUTPUT payload.
+ *
+ * Purpose:
+ *   Recover the monotonic version number used to decide whether a peer's
+ *   output-selection packet is newer than the local decision.
+ *
+ * Input:
+ *   payload  a valid SELECT payload whose bytes [1..4] contain generation.
+ *
+ * Output:
+ *   Returns the 32-bit generation reconstructed from bytes [1] (least
+ *   significant) through [4] (most significant).  It does not validate data.
+ */
 static uint32_t unpack_gen(const uint8_t payload[PACKET_PAYLOAD_LEN]) {
     return (uint32_t)payload[1] |
+           /* Generation byte 0 remains in bits 0..7 after promotion. */
            ((uint32_t)payload[2] << 8) |
+           /* Place generation byte 1 in bits 8..15. */
            ((uint32_t)payload[3] << 16) |
+           /* Place generation byte 2 in bits 16..23. */
            ((uint32_t)payload[4] << 24);
+           /* Place generation byte 3 in bits 24..31, completing little-endian. */
 }
 
+/*
+ * Queue the current output-selection decision for transmission to the peer.
+ *
+ * Purpose:
+ *   Send active_output, its generation, and the reason it changed as one
+ *   MSG_SELECT_OUTPUT packet.  The UART layer later adds frame preamble and
+ *   checksum around this payload.
+ *
+ * Input:
+ *   state   non-NULL local state containing the decision already committed.
+ *   reason  SWITCH_REASON_HOTKEY, SWITCH_REASON_EDGE, or NONE for a replay.
+ *
+ * Output:
+ *   Adds one MSG_SELECT_OUTPUT packet to the UART transmit queue.  It does not
+ *   change state; callers must update active_output/generation first.
+ */
 static void broadcast_select(device_state_t *state, switch_reason_t reason) {
     uint8_t payload[PACKET_PAYLOAD_LEN];
+    /* Temporary eight-byte body of the outgoing SELECT packet. */
+
     pack_select_payload(payload,
                         state->active_output,
                         state->output_generation,
                         (uint8_t)reason);
+    /* Serialize the already-committed output decision and its provenance. */
+
     uart_queue_packet(MSG_SELECT_OUTPUT, payload);
+    /* Queue only the message body; UART framing and checksum are added later. */
 }
 
 /*
@@ -137,23 +176,42 @@ void router_release_output(device_state_t *state, uint8_t output) {
 }
 
 /*
- * Apply a new active_output after the old output has already been released.
+ * Commit an output-selection decision after the old output is already safe.
  *
- * Does not release input.  Generation increments only when notify_peer is true.
+ * Purpose:
+ *   Apply the new routing target locally, and when this board originated the
+ *   decision, version it and advertise the same decision to the peer.
+ *
+ * Input:
+ *   state        non-NULL local shared state.  The caller has already released
+ *                old-output input if an actual switch was needed.
+ *   new_output   destination: OUTPUT_A or OUTPUT_B.
+ *   notify_peer  true for a locally owned decision that must be broadcast.
+ *   reason       origin metadata carried in MSG_SELECT_OUTPUT.
+ *
+ * Output:
+ *   On a valid destination, stores active_output.  With notify_peer true,
+ *   increments output_generation and queues MSG_SELECT_OUTPUT.  It never sends
+ *   release reports itself; router_release_output() is deliberately separate.
  */
 void router_commit_output(device_state_t *state,
                           uint8_t new_output,
                           bool notify_peer,
                           switch_reason_t reason) {
     if (new_output > OUTPUT_B) {
+        /* Reject malformed output values without changing state or notifying peer. */
         return;
     }
 
     state->active_output = new_output;
+    /* From this point, subsequent keyboard/mouse reports route to new_output. */
 
     if (notify_peer) {
+        /* Make this locally originated decision newer than all earlier decisions. */
         state->output_generation++;
+
         broadcast_select(state, reason);
+        /* Send the same output, new generation, and switch reason to the peer. */
     }
 }
 

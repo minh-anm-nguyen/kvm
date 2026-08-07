@@ -370,60 +370,138 @@ static void mouse_route_after_update(device_state_t *state, uint8_t buttons, int
 }
 
 /*
- * Edge-switch transaction: final report on old output, release, commit,
- * place pointer at entry, disarm, then first report on the new output.
+ * Move the mouse route across a horizontal PC boundary as one ordered
+ * transaction.
+ *
+ * Purpose:
+ *   Finish the event at the old PC's edge, release its input state, commit and
+ *   announce the new output, then inject a neutral pointer report just inside
+ *   the new PC.  The edge is disarmed until the pointer moves away from it.
+ *
+ * Input:
+ *   state       non-NULL board-B state; pointer_y was already updated for the
+ *               physical movement that crossed the edge.
+ *   new_output  destination PC: OUTPUT_A or OUTPUT_B.
+ *   entry_x     X coordinate just inside the new PC's entering edge.
+ *   wheel       wheel delta from the crossing report; it belongs to the final
+ *               report routed to the old output.
+ *
+ * Output:
+ *   Releases the old output, updates and broadcasts active_output with reason
+ *   SWITCH_REASON_EDGE, sets pointer_x to entry_x, disarms edge switching, and
+ *   routes an all-buttons-up, zero-wheel report to the new output.
  */
 static void mouse_edge_switch(device_state_t *state,
                               uint8_t new_output,
                               int32_t entry_x,
                               int8_t wheel) {
     uint8_t old = state->active_output;
+    /* Remember the old PC because routing changes after router_commit_output(). */
+
     mouse_abs_report_t final_r;
+    /* Report representing the final pointer position still owned by old. */
 
     if (old == OUTPUT_A) {
+        /* Leaving A to the right: finish at A's rightmost valid coordinate. */
         state->pointer_x = POINTER_MAX;
     } else {
+        /* Leaving B to the left: finish at B's leftmost valid coordinate. */
         state->pointer_x = POINTER_MIN;
     }
 
     mouse_build_report(state, 0, wheel, &final_r);
+    /* Edge switching requires no held buttons; preserve only this report's wheel. */
+
     mouse_route_absolute(state, &final_r);
+    /* Route the final edge position while old is still the active output. */
 
     router_release_output(state, old);
+    /* Send keyboard/mouse releases through the old route before changing it. */
+
     router_commit_output(state, new_output, true, SWITCH_REASON_EDGE);
+    /* Select the new PC, increment generation, and notify the peer of an edge switch. */
 
     state->pointer_x = entry_x;
+    /* Move the canonical pointer just inside the new PC's corresponding edge. */
+
     state->edge_switch_armed = false;
+    /* Prevent a small reverse movement from immediately switching back again. */
 
     mouse_route_after_update(state, 0, 0);
+    /* Deliver the initial neutral report using the new output route. */
 }
 
+/*
+ * Recenter board B's canonical mouse position after board A switches by
+ * keyboard hotkey.
+ *
+ * Purpose:
+ *   A hotkey changes active_output without a physical edge crossing.  Board B
+ *   therefore resets its local edge-switch context before it emits the next
+ *   mouse report for the newly selected PC.
+ *
+ * Input:
+ *   state  board-B state after the peer's HOTKEY selection was applied.
+ *
+ * Output:
+ *   Sets pointer_x to POINTER_CENTER, arms future edge switching, and routes a
+ *   neutral (no buttons, no wheel) absolute mouse report.  It does not choose
+ *   or change active_output itself; the router has already done that.
+ */
 void mouse_on_hotkey_switch(device_state_t *state) {
     if (state == NULL || state->board_role != ROLE_B) {
+        /* Only board B owns pointer state; reject invalid or board-A calls. */
         return;
     }
 
     state->pointer_x = POINTER_CENTER;
+    /* A hotkey has no physical entry edge, so start from the horizontal center. */
+
     state->edge_switch_armed = true;
+    /* The next deliberate crossing is allowed immediately. */
+
     mouse_route_after_update(state, 0, 0);
+    /* Publish the recentered pointer with no button or wheel activity. */
 }
 
+/*
+ * Re-enable edge switching only after the pointer has moved safely away from
+ * the edge used by the most recent edge switch.
+ *
+ * Purpose:
+ *   Avoid a rapid A -> B -> A (or B -> A -> B) bounce when the next relative
+ *   HID delta still points back toward the boundary.
+ *
+ * Input:
+ *   state  non-NULL board-B state after an ordinary, non-switching movement.
+ *   dx     signed horizontal delta from that movement.
+ *
+ * Output:
+ *   Leaves edge_switch_armed unchanged when it is already true or the pointer
+ *   is still near the entry edge.  Otherwise changes it from false to true;
+ *   it never changes the active output or routes a report.
+ */
 static void mouse_try_rearm_edge(device_state_t *state, int8_t dx) {
     if (state->edge_switch_armed) {
+        /* There is nothing to do until a later edge switch disarms it again. */
         return;
     }
 
     if (state->active_output == OUTPUT_B) {
         if (state->pointer_x > POINTER_MIN + 2 * POINTER_ENTRY_GAP ||
             (state->pointer_x >= POINTER_MIN + POINTER_ENTRY_GAP && dx > 0)) {
+            /* On B, move right away from its left entry edge before re-arming. */
             state->edge_switch_armed = true;
         }
+
+        /* OUTPUT_B is fully handled; OUTPUT_A uses the mirrored rule below. */
         return;
     }
 
     if (state->active_output == OUTPUT_A) {
         if (state->pointer_x < POINTER_MAX - 2 * POINTER_ENTRY_GAP ||
             (state->pointer_x <= POINTER_MAX - POINTER_ENTRY_GAP && dx < 0)) {
+            /* On A, move left away from its right entry edge before re-arming. */
             state->edge_switch_armed = true;
         }
     }
@@ -497,6 +575,8 @@ static void mouse_process_relative(device_state_t *state,
     state->pointer_x = mouse_clamp(next_x, POINTER_MIN, POINTER_MAX);
     /* Serialize and route this updated absolute pointer/button/wheel state. */
     mouse_route_after_update(state, buttons, wheel);
+
+    /* A normal movement away from the entry edge may permit the next switch. */
     mouse_try_rearm_edge(state, dx);
 }
 
