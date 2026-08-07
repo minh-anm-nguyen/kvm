@@ -88,51 +88,124 @@ bool board_pinmap_selftest(void) {
     return true;
 }
 
+/*
+ * Apply one internal pull direction during a role-probe sample.
+ *
+ * Purpose:
+ *   Stimulate the probe pin with the next balanced pull-up/pull-down value.
+ *   A floating pin follows this pull, while a pin driven by the board-A
+ *   isolator topology may resist it and produce a mismatch.
+ *
+ * Input:
+ *   pin        GPIO configured as an input by board_probe_role_once().
+ *   pull_high  true selects the internal pull-up; false selects pull-down.
+ *
+ * Output:
+ *   Changes only the internal pull configuration.  It does not wait, sample,
+ *   classify, or disable the pull; the caller performs those steps per sample.
+ */
 static void board_probe_apply_pull(uint pin, bool pull_high) {
     if (pull_high) {
         gpio_pull_up(pin);
+        /* Ask a floating probe pin to read logic high for this sample. */
     } else {
         gpio_pull_down(pin);
+        /* Ask a floating probe pin to read logic low for this sample. */
     }
 }
 
+/*
+ * Convert one completed probe round's mismatch count into an A/B/ambiguous
+ * observation.
+ *
+ * Purpose:
+ *   Keep electrical sampling separate from classification policy.  The result
+ *   is only one observation; board_detect_role() later requires consecutive
+ *   matching observations before accepting a concrete runtime role.
+ *
+ * Input:
+ *   mismatches    number of samples whose GPIO value differed from the pull
+ *                 direction requested by probe_pattern.
+ *   sample_count  total samples observed in this round; zero means the round
+ *                 supplied no evidence and must not decide a role.
+ *
+ * Output:
+ *   PROBE_ROLE_B when every sample followed the pull (floating signature),
+ *   PROBE_ROLE_A when mismatches reach ROLE_A_MIN_MISMATCHES (externally driven
+ *   signature), or PROBE_AMBIGUOUS for insufficient/noisy evidence.
+ */
 static role_probe_result_t board_probe_classify(unsigned mismatches,
                                                unsigned sample_count) {
     if (sample_count == 0) {
+        /* Never infer a board role from a round that collected no samples. */
         return PROBE_AMBIGUOUS;
     }
 
     if (mismatches == 0) {
+        /* A floating board-B probe followed every internally requested pull. */
         return PROBE_ROLE_B;
     }
 
     if (mismatches >= ROLE_A_MIN_MISMATCHES) {
+        /* Enough resistance to the pulls identifies the board-A driven topology. */
         return PROBE_ROLE_A;
     }
 
+    /* A small non-zero count can be noise, so leave it for multi-round retry. */
     return PROBE_AMBIGUOUS;
 }
 
+/*
+ * Perform one complete electrical observation of the A/B hardware topology.
+ *
+ * Purpose:
+ *   Test BOARD_A_RX against the balanced pull pattern before UART initializes
+ *   that pin.  A floating board-B location follows each pull; the board-A
+ *   isolator-driven location creates enough pull/sample mismatches to identify
+ *   its different topology.
+ *
+ * Input:
+ *   No caller arguments.  Uses BOARD_A_RX, probe_pattern, and the configured
+ *   ROLE_PROBE_SETTLE_US delay.
+ *
+ * Output:
+ *   Returns one PROBE_ROLE_A, PROBE_ROLE_B, or PROBE_AMBIGUOUS observation; it
+ *   does not establish the final role alone.  The probe pin is left as input
+ *   with its internal pulls disabled after sampling.
+ */
 role_probe_result_t board_probe_role_once(void) {
     unsigned mismatches = 0;
+    /* Count samples whose electrical value did not follow the requested pull. */
 
     gpio_init(BOARD_A_RX);
+    /* Temporarily take the future board-A RX pin out of peripheral ownership. */
+
     gpio_set_dir(BOARD_A_RX, GPIO_IN);
+    /* Never drive the probe pin; only observe its response to internal pulls. */
 
     for (size_t i = 0; i < PROBE_PATTERN_LEN; i++) {
+        /* Apply the next balanced pull-up/pull-down stimulus. */
         board_probe_apply_pull(BOARD_A_RX, probe_pattern[i]);
+
         sleep_us(ROLE_PROBE_SETTLE_US);
+        /* Give the pin voltage bounded time to settle after changing its pull. */
 
         bool sampled = gpio_get(BOARD_A_RX);
+        /* Sample the logic level while this pattern element's pull is active. */
+
         if (sampled != probe_pattern[i]) {
+            /* A driven pin resisted this pull; retain that evidence for classification. */
             mismatches++;
         }
 
         gpio_disable_pulls(BOARD_A_RX);
+        /* Remove the temporary pull before applying the following pattern element. */
     }
 
     gpio_disable_pulls(BOARD_A_RX);
+    /* Defensive final cleanup leaves no internal pull enabled after the probe. */
 
+    /* Translate this round's evidence; multi-round logic decides the final role. */
     return board_probe_classify(mismatches, (unsigned)PROBE_PATTERN_LEN);
 }
 
