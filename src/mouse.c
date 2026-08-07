@@ -340,53 +340,130 @@ static void mouse_route_absolute(device_state_t *state, const mouse_abs_report_t
     }
 }
 
+/*
+ * Build and route an absolute mouse report after pointer state has changed.
+ *
+ * Purpose:
+ *   Join the two final pipeline steps: snapshot the updated pointer state into
+ *   the canonical absolute report format, then deliver it to the active PC.
+ *
+ * Input:
+ *   state    non-NULL board-B state whose pointer_x/pointer_y are already up
+ *            to date.
+ *   buttons  button bit mask from the current physical mouse report.
+ *   wheel    signed wheel delta from that report.
+ *
+ * Output:
+ *   No return value.  mouse_route_absolute() either queues the report for the
+ *   local USB device, queues it for UART delivery to board A, or drops it when
+ *   it is identical to the previous report.
+ */
 static void mouse_route_after_update(device_state_t *state, uint8_t buttons, int8_t wheel) {
     mouse_abs_report_t report;
+    /* Temporary canonical report built from the current absolute coordinates. */
+
     mouse_build_report(state, buttons, wheel, &report);
+    /* Copy pointer X/Y plus current buttons and wheel into the wire format. */
+
     mouse_route_absolute(state, &report);
+    /* Send it using the active output selected in state. */
 }
 
+/*
+ * Transfer mouse control across the horizontal edge from one PC to the other.
+ *
+ * Purpose:
+ *   Place the pointer at the departing edge before releasing the old output,
+ *   switch the shared active output, then inject the pointer just inside the
+ *   corresponding edge of the new PC.
+ *
+ * Input:
+ *   state       non-NULL board-B state for the physical mouse owner.
+ *   new_output  destination PC: OUTPUT_A or OUTPUT_B.
+ *   entry_x     X coordinate just inside the new PC's entering edge.
+ *   buttons     current mouse-button bit mask; edge-switch callers require 0.
+ *   wheel       signed wheel delta from the movement report that crossed edge.
+ *
+ * Output:
+ *   Changes state->active_output and state->pointer_x, releases input at the
+ *   old output, notifies the peer, and routes the first absolute report to the
+ *   newly selected output.  pointer_y remains at its already updated value.
+ */
 static void mouse_edge_switch(device_state_t *state,
                               uint8_t new_output,
                               int32_t entry_x,
                               uint8_t buttons,
                               int8_t wheel) {
     if (state->active_output == OUTPUT_A) {
+        /* Leaving A to the right: release/report the pointer at A's right edge. */
         state->pointer_x = POINTER_MAX;
     } else {
+        /* Leaving B to the left: release/report the pointer at B's left edge. */
         state->pointer_x = POINTER_MIN;
     }
 
     router_set_active_output(state, new_output, true);
+    /* Release the old PC, select new_output, and broadcast that decision. */
 
     state->pointer_x = entry_x;
+    /* Reposition just inside the new PC so the next report cannot bounce back. */
+
     mouse_route_after_update(state, buttons, wheel);
+    /* Build and deliver the first pointer report through the newly selected route. */
 }
 
+/*
+ * Apply one relative boot-mouse event to board B's absolute pointer state.
+ *
+ * Purpose:
+ *   Scale dx/dy into the internal coordinate space, retain the current button
+ *   state, detect a horizontal edge crossing before clamping X, and route the
+ *   resulting absolute report to the selected PC.
+ *
+ * Input:
+ *   state    non-NULL shared state; callers provide &g_state.
+ *   dx, dy   signed relative movement from the physical mouse report.
+ *   buttons  current button bit mask from that report.
+ *   wheel    signed wheel delta from that report; all zero values are also
+ *            used by mouse_on_unmount() to release mouse input safely.
+ *
+ * Output:
+ *   Updates pointer_y, pointer_x, and mouse_buttons.  When the pointer crosses
+ *   an armed horizontal edge with no button held, it switches active_output;
+ *   otherwise it routes the updated absolute report normally.  Board A returns
+ *   immediately because board B is the physical mouse owner.
+ */
 static void mouse_process_relative(device_state_t *state,
                                    int8_t dx,
                                    int8_t dy,
                                    uint8_t buttons,
                                    int8_t wheel) {
     if (state->board_role != ROLE_B) {
+        /* Only board B owns relative HID mouse input and pointer accumulation. */
         return;
     }
 
+    /* Keep X un-clamped for now so a value beyond an edge can trigger a switch. */
     int32_t next_x = state->pointer_x + mouse_scale_delta(dx, POINTER_SCALE_X);
+    /* Y has no switching edge, but use the same scaling as the X movement. */
     int32_t next_y = state->pointer_y + mouse_scale_delta(dy, POINTER_SCALE_Y);
 
+    /* Store the bounded vertical position before any possible horizontal switch. */
     state->pointer_y = mouse_clamp(next_y, POINTER_MIN, POINTER_MAX);
+    /* Preserve button state for idle-report detection and outgoing reports. */
     state->mouse_buttons = buttons;
 
     if (mouse_should_switch_to_b(state->active_output,
                                  next_x,
                                  buttons,
                                  state->edge_switch_armed)) {
+        /* Moving right beyond PC A's edge: enter PC B near its left edge. */
         mouse_edge_switch(state,
                           OUTPUT_B,
                           POINTER_MIN + POINTER_ENTRY_GAP,
                           buttons,
                           wheel);
+        /* mouse_edge_switch() already routes the first report for PC B. */
         return;
     }
 
@@ -394,15 +471,19 @@ static void mouse_process_relative(device_state_t *state,
                                  next_x,
                                  buttons,
                                  state->edge_switch_armed)) {
+        /* Moving left beyond PC B's edge: enter PC A near its right edge. */
         mouse_edge_switch(state,
                           OUTPUT_A,
                           POINTER_MAX - POINTER_ENTRY_GAP,
                           buttons,
                           wheel);
+        /* mouse_edge_switch() already routes the first report for PC A. */
         return;
     }
 
+    /* No edge crossing: clamp the ordinary horizontal movement to valid bounds. */
     state->pointer_x = mouse_clamp(next_x, POINTER_MIN, POINTER_MAX);
+    /* Serialize and route this updated absolute pointer/button/wheel state. */
     mouse_route_after_update(state, buttons, wheel);
 }
 
