@@ -22,7 +22,24 @@ static uint16_t s_last_y;
 static int8_t s_last_wheel;
 static bool s_have_last;
 
+/*
+ * Convert a signed relative mouse delta into the internal absolute-coordinate
+ * increment for one axis.
+ *
+ * Purpose:
+ *   Relative HID mice report small signed dx/dy values.  The pointer state uses
+ *   a larger absolute coordinate range, so each delta must be scaled first.
+ *
+ * Input:
+ *   delta  signed movement reported by the mouse for one axis.
+ *   scale  number of absolute-coordinate units represented by one delta unit.
+ *
+ * Output:
+ *   The signed 32-bit product delta * scale.  This helper does not clamp the
+ *   result; mouse_pointer_advance() clamps the accumulated coordinate instead.
+ */
 int32_t mouse_scale_delta(int8_t delta, int32_t scale) {
+    /* Promote delta before multiplying so the result cannot overflow int8_t. */
     return (int32_t)delta * scale;
 }
 
@@ -36,31 +53,69 @@ int32_t mouse_clamp(int32_t value, int32_t lo, int32_t hi) {
     return value;
 }
 
+/*
+ * Advance the internal absolute pointer position by one relative HID movement.
+ *
+ * Purpose:
+ *   Translate dx/dy from a physical mouse into the bounded absolute pointer
+ *   position that can be serialized identically for the local and peer paths.
+ *
+ * Input:
+ *   pointer_x, pointer_y  writable current coordinates.  Both must be non-NULL.
+ *   dx, dy                signed relative movement reported by the mouse.
+ *
+ * Output:
+ *   Replaces *pointer_x and *pointer_y with their scaled, clamped next values.
+ *   If either coordinate pointer is NULL, it returns without changing anything.
+ */
 void mouse_pointer_advance(int32_t *pointer_x,
                            int32_t *pointer_y,
                            int8_t dx,
                            int8_t dy) {
     if (pointer_x == NULL || pointer_y == NULL) {
+        /* Both axes are required; avoid dereferencing an invalid pointer. */
         return;
     }
 
+    /* Scale each relative axis before adding it to its absolute coordinate. */
     int32_t next_x = *pointer_x + mouse_scale_delta(dx, POINTER_SCALE_X);
     int32_t next_y = *pointer_y + mouse_scale_delta(dy, POINTER_SCALE_Y);
 
+    /* Keep the canonical pointer within the range accepted by the HID report. */
     *pointer_x = mouse_clamp(next_x, POINTER_MIN, POINTER_MAX);
     *pointer_y = mouse_clamp(next_y, POINTER_MIN, POINTER_MAX);
 }
 
+/*
+ * Construct one canonical absolute mouse report from the current device state.
+ *
+ * Purpose:
+ *   Capture buttons, wheel movement, and the accumulated pointer position in a
+ *   single report suitable for either local USB output or UART transmission.
+ *
+ * Input:
+ *   state    non-NULL state containing the current signed pointer_x/pointer_y.
+ *   buttons  current HID mouse-button bit mask.
+ *   wheel    signed wheel delta for this report.
+ *   out      non-NULL destination mouse_abs_report_t to populate.
+ *
+ * Output:
+ *   Clears and fills *out with buttons, clamped unsigned x/y, and wheel.  The
+ *   function never changes *state; if state or out is NULL, it does nothing.
+ */
 void mouse_build_report(const device_state_t *state,
                         uint8_t buttons,
                         int8_t wheel,
                         mouse_abs_report_t *out) {
     if (state == NULL || out == NULL) {
+        /* A source state and destination report are both required. */
         return;
     }
 
+    /* Zero reserved/padding fields before assigning the wire-visible values. */
     memset(out, 0, sizeof(*out));
     out->buttons = buttons;
+    /* Clamp again defensively before converting the signed state to uint16_t. */
     out->x = (uint16_t)mouse_clamp(state->pointer_x, POINTER_MIN, POINTER_MAX);
     out->y = (uint16_t)mouse_clamp(state->pointer_y, POINTER_MIN, POINTER_MAX);
     out->wheel = wheel;

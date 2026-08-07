@@ -18,33 +18,85 @@ typedef struct {
 
 static kbd_queue_t s_tx_q;
 static bool s_hotkey_held;
+
+/*
+ * Hotkey safety gate: true after a new Ctrl+Caps Lock switch is accepted.
+ *
+ * While true, keyboard_on_report() discards every non-empty report.  It resets
+ * only when it receives an all-keys-released report (or the keyboard unmounts),
+ * preventing the hotkey's remaining key-up/key-down state from reaching the
+ * newly selected PC.
+ */
 static bool s_suppress_until_empty;
 
+/*
+ * Determine whether a boot-keyboard report represents "all keys released".
+ *
+ * Input:
+ *   r  non-NULL HID keyboard report containing modifier bits and six keycode
+ *      slots.
+ *
+ * Output:
+ *   true only when no modifier is held and every keycode slot is zero.  Queue
+ *   overflow and hotkey suppression use this to preserve release reports.
+ */
 static bool report_is_empty(const hid_keyboard_report_t *r) {
     if (r->modifier != 0) {
+        /* Any Ctrl/Shift/Alt/GUI modifier means a key is still held. */
         return false;
     }
+
     for (int i = 0; i < 6; i++) {
+        /* Boot protocol carries up to six non-modifier keys in these slots. */
         if (r->keycode[i] != 0) {
+            /* A non-zero usage code means this is not an all-keys-up report. */
             return false;
         }
     }
+
     return true;
 }
 
+/*
+ * Search the six non-modifier keycode slots of a boot-keyboard report.
+ *
+ * Input:
+ *   key     HID usage code to find.
+ *   report  non-NULL decoded keyboard report.
+ *
+ * Output:
+ *   true when key appears in any keycode slot; false otherwise.  Modifier bits
+ *   are intentionally not inspected here because callers check them separately.
+ */
 static bool key_in_report(uint8_t key, const hid_keyboard_report_t *report) {
     for (int i = 0; i < 6; i++) {
         if (report->keycode[i] == key) {
+            /* Found the requested HID usage code. */
             return true;
         }
     }
+
     return false;
 }
 
+/*
+ * Recognize the fixed keyboard shortcut that switches the active output.
+ *
+ * Input:
+ *   report  non-NULL decoded boot-keyboard report.
+ *
+ * Output:
+ *   true when all bits in HOTKEY_MODIFIER are held and HOTKEY_KEYCODE appears
+ *   in the non-modifier keycode slots.  Additional modifiers or keys do not
+ *   prevent recognition because the required combination is still present.
+ */
 static bool is_switch_hotkey(const hid_keyboard_report_t *report) {
     if ((report->modifier & HOTKEY_MODIFIER) != HOTKEY_MODIFIER) {
+        /* The required modifier, currently Left Ctrl, is not held. */
         return false;
     }
+
+    /* Require the non-modifier hotkey, currently Caps Lock, as well. */
     return key_in_report(HOTKEY_KEYCODE, report);
 }
 
