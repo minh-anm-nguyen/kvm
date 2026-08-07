@@ -370,46 +370,32 @@ static void mouse_route_after_update(device_state_t *state, uint8_t buttons, int
 }
 
 /*
- * Transfer mouse control across the horizontal edge from one PC to the other.
- *
- * Purpose:
- *   Place the pointer at the departing edge before releasing the old output,
- *   switch the shared active output, then inject the pointer just inside the
- *   corresponding edge of the new PC.
- *
- * Input:
- *   state       non-NULL board-B state for the physical mouse owner.
- *   new_output  destination PC: OUTPUT_A or OUTPUT_B.
- *   entry_x     X coordinate just inside the new PC's entering edge.
- *   buttons     current mouse-button bit mask; edge-switch callers require 0.
- *   wheel       signed wheel delta from the movement report that crossed edge.
- *
- * Output:
- *   Changes state->active_output and state->pointer_x, releases input at the
- *   old output, notifies the peer, and routes the first absolute report to the
- *   newly selected output.  pointer_y remains at its already updated value.
+ * Edge-switch transaction: final report on old output, release, commit,
+ * place pointer at entry, disarm, then first report on the new output.
  */
 static void mouse_edge_switch(device_state_t *state,
                               uint8_t new_output,
                               int32_t entry_x,
-                              uint8_t buttons,
                               int8_t wheel) {
-    if (state->active_output == OUTPUT_A) {
-        /* Leaving A to the right: release/report the pointer at A's right edge. */
+    uint8_t old = state->active_output;
+    mouse_abs_report_t final_r;
+
+    if (old == OUTPUT_A) {
         state->pointer_x = POINTER_MAX;
     } else {
-        /* Leaving B to the left: release/report the pointer at B's left edge. */
         state->pointer_x = POINTER_MIN;
     }
 
-    router_set_active_output(state, new_output, true);
-    /* Release the old PC, select new_output, and broadcast that decision. */
+    mouse_build_report(state, 0, wheel, &final_r);
+    mouse_route_absolute(state, &final_r);
+
+    router_release_output(state, old);
+    router_commit_output(state, new_output, true);
 
     state->pointer_x = entry_x;
-    /* Reposition just inside the new PC so the next report cannot bounce back. */
+    state->edge_switch_armed = false;
 
-    mouse_route_after_update(state, buttons, wheel);
-    /* Build and deliver the first pointer report through the newly selected route. */
+    mouse_route_after_update(state, 0, 0);
 }
 
 /*
@@ -461,9 +447,7 @@ static void mouse_process_relative(device_state_t *state,
         mouse_edge_switch(state,
                           OUTPUT_B,
                           POINTER_MIN + POINTER_ENTRY_GAP,
-                          buttons,
                           wheel);
-        /* mouse_edge_switch() already routes the first report for PC B. */
         return;
     }
 
@@ -471,13 +455,10 @@ static void mouse_process_relative(device_state_t *state,
                                  next_x,
                                  buttons,
                                  state->edge_switch_armed)) {
-        /* Moving left beyond PC B's edge: enter PC A near its right edge. */
         mouse_edge_switch(state,
                           OUTPUT_A,
                           POINTER_MAX - POINTER_ENTRY_GAP,
-                          buttons,
                           wheel);
-        /* mouse_edge_switch() already routes the first report for PC A. */
         return;
     }
 

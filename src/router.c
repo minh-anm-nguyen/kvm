@@ -100,7 +100,7 @@ void router_broadcast_active_output(device_state_t *state) {
  *   only the input type owned by this board over UART when the old PC is remote.
  *   Keyboard originates on A; mouse originates on B.
  */
-static void release_output(device_state_t *state, uint8_t output) {
+void router_release_output(device_state_t *state, uint8_t output) {
     hid_keyboard_report_t empty_kbd = {0};
     /* An all-zero keyboard report releases every key. */
 
@@ -126,6 +126,24 @@ static void release_output(device_state_t *state, uint8_t output) {
         /* Keep the current absolute position but clear all mouse buttons and wheel. */
 
         uart_queue_mouse(&empty_mouse);
+    }
+}
+
+/*
+ * Apply a new active_output after the old output has already been released.
+ *
+ * Does not release input.  Generation increments only when notify_peer is true.
+ */
+void router_commit_output(device_state_t *state, uint8_t new_output, bool notify_peer) {
+    if (new_output > OUTPUT_B) {
+        return;
+    }
+
+    state->active_output = new_output;
+
+    if (notify_peer) {
+        state->output_generation++;
+        router_broadcast_active_output(state);
     }
 }
 
@@ -158,19 +176,15 @@ void router_set_active_output(device_state_t *state, uint8_t new_output, bool no
 
     if (old != new_output) {
         /* A real switch is required: release reports must use the old route. */
-        release_output(state, old);
-
-        state->active_output = new_output;
-        /* Only after release, direct subsequent keyboard and mouse reports here. */
+        router_release_output(state, old);
+        router_commit_output(state, new_output, notify_peer);
+        return;
     }
 
     if (notify_peer) {
-        /* This also broadcasts when old == new_output, if the caller requests it. */
-        /* Mark this local decision newer than every previously known one. */
+        /* Same output: still advance generation and rebroadcast when requested. */
         state->output_generation++;
-
         router_broadcast_active_output(state);
-        /* Send the current output and its new generation to the peer. */
     }
 }
 
