@@ -398,6 +398,27 @@ static void mouse_edge_switch(device_state_t *state,
     mouse_route_after_update(state, 0, 0);
 }
 
+static void mouse_try_rearm_edge(device_state_t *state, int8_t dx) {
+    if (state->edge_switch_armed) {
+        return;
+    }
+
+    if (state->active_output == OUTPUT_B) {
+        if (state->pointer_x > POINTER_MIN + 2 * POINTER_ENTRY_GAP ||
+            (state->pointer_x >= POINTER_MIN + POINTER_ENTRY_GAP && dx > 0)) {
+            state->edge_switch_armed = true;
+        }
+        return;
+    }
+
+    if (state->active_output == OUTPUT_A) {
+        if (state->pointer_x < POINTER_MAX - 2 * POINTER_ENTRY_GAP ||
+            (state->pointer_x <= POINTER_MAX - POINTER_ENTRY_GAP && dx < 0)) {
+            state->edge_switch_armed = true;
+        }
+    }
+}
+
 /*
  * Apply one relative boot-mouse event to board B's absolute pointer state.
  *
@@ -466,6 +487,7 @@ static void mouse_process_relative(device_state_t *state,
     state->pointer_x = mouse_clamp(next_x, POINTER_MIN, POINTER_MAX);
     /* Serialize and route this updated absolute pointer/button/wheel state. */
     mouse_route_after_update(state, buttons, wheel);
+    mouse_try_rearm_edge(state, dx);
 }
 
 /*
