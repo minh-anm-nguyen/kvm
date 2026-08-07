@@ -13,6 +13,41 @@ bool router_is_local_active(const device_state_t *state) {
     return state->active_output == state->board_role;
 }
 
+router_reconcile_action_t router_reconcile_output_decision(board_role_t local_role,
+                                                           uint8_t local_output,
+                                                           uint32_t local_gen,
+                                                           uint8_t peer_output,
+                                                           uint32_t peer_gen,
+                                                           bool peer_just_online) {
+    if (peer_output > OUTPUT_B || local_output > OUTPUT_B) {
+        return ROUTER_RECONCILE_NONE;
+    }
+
+    if (peer_gen > local_gen) {
+        return ROUTER_RECONCILE_ADOPT_PEER;
+    }
+
+    if (peer_gen < local_gen) {
+        return peer_just_online ? ROUTER_RECONCILE_BROADCAST : ROUTER_RECONCILE_NONE;
+    }
+
+    if (peer_output != local_output) {
+        if (local_role == BOARD_ROLE_B) {
+            return ROUTER_RECONCILE_ADOPT_PEER;
+        }
+        if (local_role == BOARD_ROLE_A) {
+            return ROUTER_RECONCILE_BROADCAST;
+        }
+        return ROUTER_RECONCILE_NONE;
+    }
+
+    if (peer_just_online) {
+        return ROUTER_RECONCILE_BROADCAST;
+    }
+
+    return ROUTER_RECONCILE_NONE;
+}
+
 /*
  * Build the eight-byte body of MSG_SELECT_OUTPUT.
  *
@@ -548,32 +583,85 @@ void router_on_peer_heartbeat(device_state_t *state, const uint8_t payload[8], b
         return;
     }
 
-    if (peer_gen > state->output_generation) {
+    router_reconcile_action_t action =
+        router_reconcile_output_decision(state->board_role,
+                                         state->active_output,
+                                         state->output_generation,
+                                         peer_output,
+                                         peer_gen,
+                                         peer_just_online);
+
+    if (action == ROUTER_RECONCILE_ADOPT_PEER) {
         uint8_t sel[PACKET_PAYLOAD_LEN];
         pack_select_payload(sel, peer_output, peer_gen, SWITCH_REASON_NONE);
         router_on_select_output(state, sel);
         return;
     }
 
-    if (peer_gen < state->output_generation) {
-        if (peer_just_online) {
-            router_broadcast_active_output(state);
-        }
-        return;
-    }
-
-    if (peer_output != state->active_output) {
-        if (state->board_role == ROLE_B) {
-            uint8_t sel[PACKET_PAYLOAD_LEN];
-            pack_select_payload(sel, peer_output, peer_gen, SWITCH_REASON_NONE);
-            router_on_select_output(state, sel);
-        } else {
-            router_broadcast_active_output(state);
-        }
-        return;
-    }
-
-    if (peer_just_online) {
+    if (action == ROUTER_RECONCILE_BROADCAST) {
         router_broadcast_active_output(state);
     }
+}
+
+bool router_output_selftest(void) {
+    if (DEFAULT_ACTIVE_OUTPUT != OUTPUT_A) {
+        return false;
+    }
+
+    /* Bootstrap defaults both boards claim after board_init. */
+    if (router_reconcile_output_decision(BOARD_ROLE_A, OUTPUT_A, 0,
+                                         OUTPUT_A, 0, true) !=
+        ROUTER_RECONCILE_BROADCAST) {
+        return false;
+    }
+    if (router_reconcile_output_decision(BOARD_ROLE_B, OUTPUT_A, 0,
+                                         OUTPUT_A, 0, true) !=
+        ROUTER_RECONCILE_BROADCAST) {
+        return false;
+    }
+
+    /* B converges on equal-gen output mismatch; A refuses. */
+    if (router_reconcile_output_decision(BOARD_ROLE_B, OUTPUT_B, 0,
+                                         OUTPUT_A, 0, false) !=
+        ROUTER_RECONCILE_ADOPT_PEER) {
+        return false;
+    }
+    if (router_reconcile_output_decision(BOARD_ROLE_A, OUTPUT_A, 0,
+                                         OUTPUT_B, 0, false) !=
+        ROUTER_RECONCILE_BROADCAST) {
+        return false;
+    }
+
+    /* Newer generation wins regardless of which board rebooted first. */
+    if (router_reconcile_output_decision(BOARD_ROLE_A, OUTPUT_A, 0,
+                                         OUTPUT_B, 5, false) !=
+        ROUTER_RECONCILE_ADOPT_PEER) {
+        return false;
+    }
+    if (router_reconcile_output_decision(BOARD_ROLE_B, OUTPUT_A, 0,
+                                         OUTPUT_B, 3, false) !=
+        ROUTER_RECONCILE_ADOPT_PEER) {
+        return false;
+    }
+
+    /* Local newer: reassert only on peer_just_online. */
+    if (router_reconcile_output_decision(BOARD_ROLE_A, OUTPUT_B, 4,
+                                         OUTPUT_A, 1, true) !=
+        ROUTER_RECONCILE_BROADCAST) {
+        return false;
+    }
+    if (router_reconcile_output_decision(BOARD_ROLE_A, OUTPUT_B, 4,
+                                         OUTPUT_A, 1, false) !=
+        ROUTER_RECONCILE_NONE) {
+        return false;
+    }
+
+    /* Steady state equal gen / same output. */
+    if (router_reconcile_output_decision(BOARD_ROLE_A, OUTPUT_B, 2,
+                                         OUTPUT_B, 2, false) !=
+        ROUTER_RECONCILE_NONE) {
+        return false;
+    }
+
+    return true;
 }

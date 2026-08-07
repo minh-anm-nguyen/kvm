@@ -4,6 +4,7 @@
 #include "keyboard.h"
 #include "mouse.h"
 #include "protocol.h"
+#include "router.h"
 #include "state.h"
 #include "uart.h"
 #include "usb_device.h"
@@ -21,7 +22,8 @@ int main(void) {
         !board_detect_selftest() ||
         !mouse_pointer_selftest() ||
         !mouse_edge_selftest() ||
-        !protocol_selftest()) {
+        !protocol_selftest() ||
+        !router_output_selftest()) {
         while (true) {
             tight_loop_contents();
         }

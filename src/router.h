@@ -11,6 +11,12 @@ typedef enum {
     SWITCH_REASON_EDGE,
 } switch_reason_t;
 
+typedef enum {
+    ROUTER_RECONCILE_NONE = 0,
+    ROUTER_RECONCILE_ADOPT_PEER,
+    ROUTER_RECONCILE_BROADCAST,
+} router_reconcile_action_t;
+
 void router_release_output(device_state_t *state, uint8_t output);
 void router_commit_output(device_state_t *state,
                           uint8_t new_output,
@@ -29,3 +35,11 @@ void router_enter_role_conflict(device_state_t *state);
 void router_broadcast_active_output(device_state_t *state);
 
 bool router_is_local_active(const device_state_t *state);
+
+router_reconcile_action_t router_reconcile_output_decision(board_role_t local_role,
+                                                           uint8_t local_output,
+                                                           uint32_t local_gen,
+                                                           uint8_t peer_output,
+                                                           uint32_t peer_gen,
+                                                           bool peer_just_online);
+bool router_output_selftest(void);
